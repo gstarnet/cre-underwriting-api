@@ -22,27 +22,15 @@ MODELS_DIR.mkdir(exist_ok=True, parents=True)
 
 
 def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
-    # Detect numeric vs categorical columns
     numeric_cols = X.select_dtypes(include=["number", "bool"]).columns.tolist()
     categorical_cols = [c for c in X.columns if c not in numeric_cols]
 
-    # Drop columns that should never be used as predictive signals
-    drop_cols = []
-    if "deal_id" in X.columns:
-        drop_cols.append("deal_id")
-    # We use asof_date for time-splitting, not as a model feature
-    if TIME_COL in X.columns:
-        drop_cols.append(TIME_COL)
-
+    # Drop non-signal fields
+    drop_cols = [c for c in ["deal_id", TIME_COL] if c in X.columns]
     numeric_cols = [c for c in numeric_cols if c not in drop_cols]
     categorical_cols = [c for c in categorical_cols if c not in drop_cols]
 
-    numeric_pipe = Pipeline(
-        steps=[
-            ("imputer", SimpleImputer(strategy="median")),
-        ]
-    )
-
+    numeric_pipe = Pipeline(steps=[("imputer", SimpleImputer(strategy="median"))])
     categorical_pipe = Pipeline(
         steps=[
             ("imputer", SimpleImputer(strategy="most_frequent")),
@@ -60,36 +48,34 @@ def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
 
 
 def eval_regression(y_true, y_pred) -> dict:
-    mse = mean_squared_error(y_true, y_pred)  # no squared= on older sklearn
+    mse = mean_squared_error(y_true, y_pred)  # old sklearn compatible
     rmse = float(mse ** 0.5)
-    return {
-        "mae": float(mean_absolute_error(y_true, y_pred)),
-        "rmse": rmse,
-        "r2": float(r2_score(y_true, y_pred)),
-    }
+    mae = float(mean_absolute_error(y_true, y_pred))
+
+    # R² not defined for < 2 samples
+    r2 = None
+    if len(y_true) >= 2:
+        r2 = float(r2_score(y_true, y_pred))
+
+    return {"mae": mae, "rmse": rmse, "r2": r2}
 
 
 def main() -> None:
-    # Load data and do a time-safe split
     df = load_cre_csv("data/raw/cre_deals.csv")
     ds = time_split(df, test_frac=0.2)
 
     pre = build_preprocessor(ds.X_train)
 
-    # Two-model baseline: interpretable + strong tabular
     candidates = {
         "ridge": Ridge(alpha=1.0, random_state=42),
         "hgb": HistGradientBoostingRegressor(random_state=42),
     }
 
     results = []
-    best_name = None
-    best_rmse = None
-    best_pipe = None
+    best_name, best_rmse, best_pipe = None, None, None
 
     for name, model in candidates.items():
         pipe = Pipeline(steps=[("pre", pre), ("model", model)])
-
         pipe.fit(ds.X_train, ds.y_train)
         pred = pipe.predict(ds.X_test)
 
