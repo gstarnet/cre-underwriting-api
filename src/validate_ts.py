@@ -1,8 +1,7 @@
-# src/train.py
+# src/validate_ts.py
 from __future__ import annotations
 
 from pathlib import Path
-import joblib
 import numpy as np
 import pandas as pd
 
@@ -10,15 +9,14 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 from src.data_load import load_cre_csv, time_split, CRE_TARGET, TIME_COL
 
 REPORTS_DIR = Path("reports")
-MODELS_DIR = Path("models")
 REPORTS_DIR.mkdir(exist_ok=True, parents=True)
-MODELS_DIR.mkdir(exist_ok=True, parents=True)
 
 
 def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
@@ -64,34 +62,77 @@ def eval_regression(y_true, y_pred) -> dict:
     return {"mae": mae, "rmse": rmse, "r2": r2}
 
 
-def main() -> None:
-    df = load_cre_csv("data/raw/cre_deals.csv")
-    ds = time_split(df, test_frac=0.2)
+def walk_forward_cv(
+        X: pd.DataFrame,
+        y: pd.Series,
+        n_splits: int = 5,
+) -> pd.DataFrame:
+    n = len(X)
+    n_splits = max(2, min(n_splits, n - 1))
+    tscv = TimeSeriesSplit(n_splits=n_splits)
 
-    pre = build_preprocessor(ds.X_train)
-
+    pre = build_preprocessor(X)
     model = HistGradientBoostingRegressor(random_state=42)
     pipe = Pipeline(steps=[("pre", pre), ("model", model)])
 
-    pipe.fit(ds.X_train, ds.y_train)
-    pred = pipe.predict(ds.X_test)
+    rows = []
+    split_idx = 0
 
-    if not np.isfinite(pred).all():
-        raise RuntimeError("Non-finite predictions detected for HGB (unexpected).")
+    for train_idx, val_idx in tscv.split(X):
+        split_idx += 1
 
-    metrics = eval_regression(ds.y_test, pred)
-    metrics_df = pd.DataFrame([{"model": "hgb", **metrics}])
+        X_tr, X_va = X.iloc[train_idx], X.iloc[val_idx]
+        y_tr, y_va = y.iloc[train_idx], y.iloc[val_idx]
 
-    metrics_path = REPORTS_DIR / "metrics.csv"
-    metrics_df.to_csv(metrics_path, index=False)
+        pipe.fit(X_tr, y_tr)
+        pred = pipe.predict(X_va)
 
-    model_path = MODELS_DIR / "model.joblib"
-    joblib.dump(pipe, model_path)
+        # guard (should be fine for HGB)
+        if not np.isfinite(pred).all():
+            raise RuntimeError(f"Non-finite predictions in split {split_idx}")
 
-    print(f"Target: {CRE_TARGET}")
-    print("Saved metrics:", metrics_path)
-    print(metrics_df.to_string(index=False))
-    print("Saved model:", model_path, "best= hgb")
+        m = eval_regression(y_va, pred)
+
+        rows.append(
+            {
+                "model": "hgb",
+                "split": split_idx,
+                "train_n": len(train_idx),
+                "val_n": len(val_idx),
+                "mae": m["mae"],
+                "rmse": m["rmse"],
+                "r2": m["r2"],
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def main():
+    df = load_cre_csv("data/raw/cre_deals.csv")
+    ds = time_split(df, test_frac=0.2)
+
+    # CV runs on TRAIN ONLY, ordered by time
+    X_train = ds.X_train.sort_values(TIME_COL).reset_index(drop=True)
+    y_train = ds.y_train.reset_index(drop=True)
+
+    cv_metrics = walk_forward_cv(X_train, y_train, n_splits=5)
+
+    summary = (
+        cv_metrics.groupby("model")[["mae", "rmse"]]
+        .agg(["mean", "std"])
+        .reset_index()
+    )
+    summary.columns = ["model", "mae_mean", "mae_std", "rmse_mean", "rmse_std"]
+
+    cv_path = REPORTS_DIR / "ts_cv_metrics.csv"
+    summary_path = REPORTS_DIR / "ts_cv_summary.csv"
+    cv_metrics.to_csv(cv_path, index=False)
+    summary.to_csv(summary_path, index=False)
+
+    print("Saved:", cv_path)
+    print("Saved:", summary_path)
+    print(summary.to_string(index=False))
 
 
 if __name__ == "__main__":
