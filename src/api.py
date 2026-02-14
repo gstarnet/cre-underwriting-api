@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 # Third-party
 import joblib
 import pandas as pd
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException  # NEW: convert bad inputs into clear 4xx instead of silent 500s
 from pydantic import BaseModel, Field
 
 # Local modules
@@ -81,6 +81,56 @@ def health():
     - container/orchestrator health probes
     """
     return {"status": "ok"}
+
+
+# =============================================================================
+# Institutional what-if hardening helpers
+# =============================================================================
+
+# NEW: strict allow-list to prevent typos causing confusing results
+WHATIF_INST_SORT_KEYS = {
+    "irr",
+    "min_dscr",
+    "debt_yield_year1",
+    "net_sale_proceeds",
+    "cash_on_cash_year1",
+}
+
+
+def _normalize_year_keyed_dict(d: Optional[Dict[Any, Any]]) -> Optional[Dict[int, float]]:
+    """
+    NEW: Normalize year-keyed dicts coming from JSON.
+
+    JSON object keys are always strings, so payloads like:
+      {"2": 250000}
+    arrive as {"2": 250000} but the underwriting engine commonly expects int years.
+
+    Returns:
+    - None if d is None
+    - Dict[int, float] otherwise
+    """
+    if not d:
+        return None
+    try:
+        return {int(k): float(v) for k, v in d.items()}
+    except Exception as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"value_add_capex must map year->amount (example: {{\"2\": 250000}}). Error: {e}",
+        )
+
+
+def _reject_empty_list(name: str, v: Optional[List[Any]]) -> Optional[List[Any]]:
+    """
+    NEW: Reject empty scenario vectors early.
+
+    Why:
+    - An empty list is almost always a caller bug.
+    - Without this, some scenario engines silently fall back or produce confusing behavior.
+    """
+    if v is not None and len(v) == 0:
+        raise HTTPException(status_code=422, detail=f"{name} cannot be an empty list")
+    return v
 
 
 # =============================================================================
@@ -497,6 +547,9 @@ def underwrite_inst_endpoint(req: UnderwriteInstRequest):
     replacement_capex_per_sqft = payload.pop("replacement_capex_per_sqft")
     value_add_capex = payload.pop("value_add_capex")
 
+    # NEW: normalize year-keyed capex dict (JSON keys come in as strings)
+    value_add_capex = _normalize_year_keyed_dict(value_add_capex)
+
     occupancy_shock_year = payload.pop("occupancy_shock_year")
     occupancy_shock_drop = payload.pop("occupancy_shock_drop")
     occupancy_recovery_years = payload.pop("occupancy_recovery_years")
@@ -624,23 +677,40 @@ def whatif_inst(req: WhatIfInstRequest):
     Key idea:
     - The institutional underwriting is driven by provided line items and pro forma knobs.
     - The ML NOI prediction is returned only as an anchor/comparison.
+
+    NEW hardening:
+    - Validates sort_by to prevent typos.
+    - Rejects empty scenario vectors (likely caller bugs).
+    - Normalizes year-keyed capex dict so underwriting logic doesn't break.
+    - Wraps scenario engine to return meaningful 4xx/5xx errors instead of silent 500s.
     """
     model = get_model()
+
+    # Validate sort key early (clear 422 instead of falling back silently)
+    if req.sort_by not in WHATIF_INST_SORT_KEYS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"sort_by must be one of {sorted(WHATIF_INST_SORT_KEYS)}",
+        )
 
     # Start from request data; then peel off vectors and build ML + underwriting payloads.
     payload = req.model_dump()
 
     # Scenario vectors
-    purchase_prices = payload.pop("purchase_prices", None)
-    ltvs = payload.pop("ltvs", None)
-    interest_rates = payload.pop("interest_rates", None)
-    exit_cap_rates = payload.pop("exit_cap_rates", None)
+    purchase_prices = _reject_empty_list("purchase_prices", payload.pop("purchase_prices", None))
+    ltvs = _reject_empty_list("ltvs", payload.pop("ltvs", None))
+    interest_rates = _reject_empty_list("interest_rates", payload.pop("interest_rates", None))
+    exit_cap_rates = _reject_empty_list("exit_cap_rates", payload.pop("exit_cap_rates", None))
 
-    rent_growths = payload.pop("rent_growths", None)
-    capex_reserve_per_sqft_values = payload.pop("capex_reserve_per_sqft_values", None)
-    replacement_capex_per_sqft_values = payload.pop("replacement_capex_per_sqft_values", None)
-    occupancy_shock_drops = payload.pop("occupancy_shock_drops", None)
-    rate_shock_bps_values = payload.pop("rate_shock_bps_values", None)
+    rent_growths = _reject_empty_list("rent_growths", payload.pop("rent_growths", None))
+    capex_reserve_per_sqft_values = _reject_empty_list(
+        "capex_reserve_per_sqft_values", payload.pop("capex_reserve_per_sqft_values", None)
+    )
+    replacement_capex_per_sqft_values = _reject_empty_list(
+        "replacement_capex_per_sqft_values", payload.pop("replacement_capex_per_sqft_values", None)
+    )
+    occupancy_shock_drops = _reject_empty_list("occupancy_shock_drops", payload.pop("occupancy_shock_drops", None))
+    rate_shock_bps_values = _reject_empty_list("rate_shock_bps_values", payload.pop("rate_shock_bps_values", None))
 
     max_scenarios = int(payload.pop("max_scenarios", 200))
     top_n = int(payload.pop("top_n", 50))
@@ -686,6 +756,9 @@ def whatif_inst(req: WhatIfInstRequest):
 
     base_ml_features = {k: v for k, v in payload.items() if k not in inst_keys}
 
+    # Normalize year-keyed dicts for institutional inputs
+    normalized_value_add_capex = _normalize_year_keyed_dict(req.value_add_capex)
+
     # Build base institutional inputs for InstUnderwriteInputs:
     base_inst_inputs = {
         "purchase_price": float(req.purchase_price),
@@ -713,7 +786,7 @@ def whatif_inst(req: WhatIfInstRequest):
         "reassess_year": int(req.reassess_year),
         "capex_reserve_per_sqft": float(req.capex_reserve_per_sqft),
         "replacement_capex_per_sqft": float(req.replacement_capex_per_sqft),
-        "value_add_capex": req.value_add_capex,
+        "value_add_capex": normalized_value_add_capex,
         "occupancy_shock_year": req.occupancy_shock_year,
         "occupancy_shock_drop": float(req.occupancy_shock_drop),
         "occupancy_recovery_years": int(req.occupancy_recovery_years),
@@ -726,23 +799,35 @@ def whatif_inst(req: WhatIfInstRequest):
         "refi_cost_pct": float(req.refi_cost_pct),
     }
 
-    results = run_whatif_inst(
-        model=model,
-        base_ml_features=base_ml_features,
-        base_inst_inputs=base_inst_inputs,
-        purchase_prices=purchase_prices,
-        ltvs=ltvs,
-        interest_rates=interest_rates,
-        exit_cap_rates=exit_cap_rates,
-        rent_growths=rent_growths,
-        capex_reserve_per_sqft_values=capex_reserve_per_sqft_values,
-        replacement_capex_per_sqft_values=replacement_capex_per_sqft_values,
-        occupancy_shock_drops=occupancy_shock_drops,
-        rate_shock_bps_values=rate_shock_bps_values,
-        max_scenarios=max_scenarios,
-        top_n=top_n,
-        sort_by=sort_by,
-    )
+    try:
+        results = run_whatif_inst(
+            model=model,
+            base_ml_features=base_ml_features,
+            base_inst_inputs=base_inst_inputs,
+            purchase_prices=purchase_prices,
+            ltvs=ltvs,
+            interest_rates=interest_rates,
+            exit_cap_rates=exit_cap_rates,
+            rent_growths=rent_growths,
+            capex_reserve_per_sqft_values=capex_reserve_per_sqft_values,
+            replacement_capex_per_sqft_values=replacement_capex_per_sqft_values,
+            occupancy_shock_drops=occupancy_shock_drops,
+            rate_shock_bps_values=rate_shock_bps_values,
+            max_scenarios=max_scenarios,
+            top_n=top_n,
+            sort_by=sort_by,
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        # NEW: treat known input problems as 422 (caller can fix payload)
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        # NEW: keep the real error type in the response for faster diagnosis
+        raise HTTPException(
+            status_code=500,
+            detail=f"/whatif_inst failed: {type(e).__name__}: {e}",
+        )
 
     return WhatIfInstResponse(
         scenarios=[

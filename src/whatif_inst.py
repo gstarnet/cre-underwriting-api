@@ -80,6 +80,28 @@ def _sort_key(result: WhatIfInstScenarioResult, sort_by: str) -> float:
     return float(s.get("irr", float("-inf")))
 
 
+# NEW: keep allowed values in one place (engine-level guardrails)
+_ALLOWED_SORT_KEYS = {
+    "irr",
+    "min_dscr",
+    "debt_yield_year1",
+    "net_sale_proceeds",
+    "cash_on_cash_year1",
+}
+
+
+def _estimate_grid_size(grid_axes: List[Tuple[str, List[Any]]]) -> int:
+    """
+    NEW: Estimate total scenario grid size (Cartesian product).
+
+    Used for hard guardrails so callers don't accidentally request massive work.
+    """
+    est = 1
+    for _, v in grid_axes:
+        est *= max(1, len(v))
+    return est
+
+
 def run_whatif_inst(
         *,
         model: Any,
@@ -109,8 +131,24 @@ def run_whatif_inst(
       is driven by line items (gross rent, opex, occupancy, etc.).
     - base_ml_features should include ONLY the fields the model expects.
     - base_inst_inputs should include the InstUnderwriteInputs fields.
+
+    NEW hardening:
+    - Reject invalid sort_by values.
+    - Guard against exploding scenario grids.
+    - Per-scenario error capture: one bad scenario should not crash the whole run.
+      (If all scenarios fail, we raise a ValueError with a summary.)
     """
     from src.underwrite_inst import InstUnderwriteInputs, underwrite_institutional
+
+    if sort_by not in _ALLOWED_SORT_KEYS:
+        raise ValueError(f"sort_by must be one of {sorted(_ALLOWED_SORT_KEYS)}")
+
+    max_scenarios = int(max_scenarios)
+    top_n = int(top_n)
+    if max_scenarios < 1:
+        raise ValueError("max_scenarios must be >= 1")
+    if top_n < 1:
+        raise ValueError("top_n must be >= 1")
 
     # Normalize axis vectors to at least one value (the baseline)
     purchase_prices_l = _as_list_or_default(purchase_prices, float(base_inst_inputs["purchase_price"]))
@@ -119,8 +157,12 @@ def run_whatif_inst(
     exit_caps_l = _as_list_or_default(exit_cap_rates, float(base_inst_inputs["exit_cap_rate"]))
 
     rent_growths_l = _as_list_or_default(rent_growths, float(base_inst_inputs.get("rent_growth", 0.03)))
-    capex_res_l = _as_list_or_default(capex_reserve_per_sqft_values, float(base_inst_inputs.get("capex_reserve_per_sqft", 0.0)))
-    repl_capex_l = _as_list_or_default(replacement_capex_per_sqft_values, float(base_inst_inputs.get("replacement_capex_per_sqft", 0.0)))
+    capex_res_l = _as_list_or_default(
+        capex_reserve_per_sqft_values, float(base_inst_inputs.get("capex_reserve_per_sqft", 0.0))
+    )
+    repl_capex_l = _as_list_or_default(
+        replacement_capex_per_sqft_values, float(base_inst_inputs.get("replacement_capex_per_sqft", 0.0))
+    )
     occ_shock_l = _as_list_or_default(occupancy_shock_drops, float(base_inst_inputs.get("occupancy_shock_drop", 0.0)))
     rate_shock_l = _as_list_or_default(rate_shock_bps_values, float(base_inst_inputs.get("rate_shock_bps", 0.0)))
 
@@ -136,58 +178,86 @@ def run_whatif_inst(
         ("rate_shock_bps", rate_shock_l),
     ]
 
+    # NEW: hard guardrail against huge Cartesian products
+    est = _estimate_grid_size(grid_axes)
+    # Allow some overhead vs max_scenarios (because we cap generation anyway),
+    # but still block pathological requests.
+    if est > max_scenarios * 5:
+        raise ValueError(
+            f"Scenario grid too large: estimated {est} combinations. "
+            f"Reduce vector sizes or lower max_scenarios."
+        )
+
     results: List[WhatIfInstScenarioResult] = []
 
+    # NEW: capture per-scenario exceptions; keep a short sample for diagnostics
+    errors: List[Dict[str, Any]] = []
+    error_sample_limit = 5
+
     for overrides in _cartesian_bounded(grid_axes, max_scenarios=max_scenarios):
-        # Build scenario ML features (only fields model expects)
-        ml_features = dict(base_ml_features)
+        try:
+            # Build scenario ML features (only fields model expects)
+            ml_features = dict(base_ml_features)
 
-        # Build scenario underwriting inputs
-        inst_kwargs = dict(base_inst_inputs)
+            # Build scenario underwriting inputs
+            inst_kwargs = dict(base_inst_inputs)
 
-        # Apply overrides to both places where relevant
-        inst_kwargs["purchase_price"] = float(overrides["purchase_price"])
-        inst_kwargs["ltv"] = float(overrides["ltv"])
-        inst_kwargs["interest_rate"] = float(overrides["interest_rate"])
-        inst_kwargs["exit_cap_rate"] = float(overrides["exit_cap_rate"])
-        inst_kwargs["rent_growth"] = float(overrides["rent_growth"])
-        inst_kwargs["capex_reserve_per_sqft"] = float(overrides["capex_reserve_per_sqft"])
-        inst_kwargs["replacement_capex_per_sqft"] = float(overrides["replacement_capex_per_sqft"])
-        inst_kwargs["occupancy_shock_drop"] = float(overrides["occupancy_shock_drop"])
-        inst_kwargs["rate_shock_bps"] = float(overrides["rate_shock_bps"])
+            # Apply overrides
+            inst_kwargs["purchase_price"] = float(overrides["purchase_price"])
+            inst_kwargs["ltv"] = float(overrides["ltv"])
+            inst_kwargs["interest_rate"] = float(overrides["interest_rate"])
+            inst_kwargs["exit_cap_rate"] = float(overrides["exit_cap_rate"])
+            inst_kwargs["rent_growth"] = float(overrides["rent_growth"])
+            inst_kwargs["capex_reserve_per_sqft"] = float(overrides["capex_reserve_per_sqft"])
+            inst_kwargs["replacement_capex_per_sqft"] = float(overrides["replacement_capex_per_sqft"])
+            inst_kwargs["occupancy_shock_drop"] = float(overrides["occupancy_shock_drop"])
+            inst_kwargs["rate_shock_bps"] = float(overrides["rate_shock_bps"])
 
-        # ML feature set includes purchase_price/ltv/interest_rate (model might use these)
-        ml_features["purchase_price"] = float(overrides["purchase_price"])
-        ml_features["ltv"] = float(overrides["ltv"])
-        ml_features["interest_rate"] = float(overrides["interest_rate"])
+            # ML feature set includes purchase_price/ltv/interest_rate (model might use these)
+            ml_features["purchase_price"] = float(overrides["purchase_price"])
+            ml_features["ltv"] = float(overrides["ltv"])
+            ml_features["interest_rate"] = float(overrides["interest_rate"])
 
-        # Predict NOI anchor
-        X = pd.DataFrame([ml_features])
-        pred_noi = float(model.predict(X)[0])
+            # Predict NOI anchor
+            X = pd.DataFrame([ml_features])
+            pred_noi = float(model.predict(X)[0])
 
-        # Run institutional underwriting
-        uw = underwrite_institutional(InstUnderwriteInputs(**inst_kwargs))
+            # Run institutional underwriting
+            uw = underwrite_institutional(InstUnderwriteInputs(**inst_kwargs))
 
-        # Record scenario input summary (what changed)
-        inputs_out = {
-            "purchase_price": inst_kwargs["purchase_price"],
-            "ltv": inst_kwargs["ltv"],
-            "interest_rate": inst_kwargs["interest_rate"],
-            "exit_cap_rate": inst_kwargs["exit_cap_rate"],
-            "rent_growth": inst_kwargs["rent_growth"],
-            "capex_reserve_per_sqft": inst_kwargs["capex_reserve_per_sqft"],
-            "replacement_capex_per_sqft": inst_kwargs["replacement_capex_per_sqft"],
-            "occupancy_shock_drop": inst_kwargs["occupancy_shock_drop"],
-            "rate_shock_bps": inst_kwargs["rate_shock_bps"],
-        }
+            # Record scenario input summary (what changed)
+            inputs_out = {
+                "purchase_price": inst_kwargs["purchase_price"],
+                "ltv": inst_kwargs["ltv"],
+                "interest_rate": inst_kwargs["interest_rate"],
+                "exit_cap_rate": inst_kwargs["exit_cap_rate"],
+                "rent_growth": inst_kwargs["rent_growth"],
+                "capex_reserve_per_sqft": inst_kwargs["capex_reserve_per_sqft"],
+                "replacement_capex_per_sqft": inst_kwargs["replacement_capex_per_sqft"],
+                "occupancy_shock_drop": inst_kwargs["occupancy_shock_drop"],
+                "rate_shock_bps": inst_kwargs["rate_shock_bps"],
+            }
 
-        results.append(
-            WhatIfInstScenarioResult(
-                inputs=inputs_out,
-                predicted_noi_next12=pred_noi,
-                institutional=uw,
+            results.append(
+                WhatIfInstScenarioResult(
+                    inputs=inputs_out,
+                    predicted_noi_next12=pred_noi,
+                    institutional=uw,
+                )
             )
-        )
+
+        except Exception as e:
+            # Per-scenario failure should not nuke the whole what-if run.
+            if len(errors) < error_sample_limit:
+                errors.append({"overrides": overrides, "error": f"{type(e).__name__}: {e}"})
+            continue
+
+    if not results:
+        # NEW: make failure actionable (caller sees why it failed)
+        msg = "All institutional what-if scenarios failed."
+        if errors:
+            msg += f" Sample errors: {errors}"
+        raise ValueError(msg)
 
     # Sort and return top N
     results.sort(key=lambda r: _sort_key(r, sort_by), reverse=True)
