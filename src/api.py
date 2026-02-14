@@ -12,10 +12,11 @@ from pydantic import BaseModel, Field
 from src.roi import RoiInputs, compute_roi
 from src.whatif import run_whatif
 from src.underwrite import UnderwriteInputs, underwrite
+from src.underwrite_inst import InstUnderwriteInputs, underwrite_institutional
 
 MODEL_PATH = Path("models/model.joblib")
 
-app = FastAPI(title="CRE NOI + ROI API", version="0.4")
+app = FastAPI(title="CRE NOI + ROI API", version="0.5")
 
 _model = None
 
@@ -38,17 +39,14 @@ def health():
 # Typed prediction schema
 # -----------------------
 class PredictRequest(BaseModel):
-    # Identifiers / time (kept for compatibility; model drops these)
     deal_id: Optional[str] = None
     asof_date: Optional[str] = None  # YYYY-MM-DD
 
-    # Categorical
     property_type: str
     city: str
     state: str
     zip: str
 
-    # Numeric
     year_built: int
     gross_leasable_sqft: float
     units: Optional[float] = None
@@ -63,7 +61,6 @@ class PredictRequest(BaseModel):
     interest_rate: float = Field(..., ge=0.0, le=1.0)
     amort_years: int = Field(..., ge=1, le=40)
 
-    # ROI assumptions (not used by ML model)
     exit_cap_rate: float = Field(0.065, ge=0.0001, le=1.0)
     selling_cost_pct: float = Field(0.02, ge=0.0, le=0.2)
 
@@ -255,3 +252,96 @@ def underwrite_endpoint(req: UnderwriteRequest):
     )
 
     return UnderwriteResponse(predicted_noi_next12=pred_noi, underwriting=uw)
+
+
+# ------------------------------
+# Institutional-style underwriting
+# ------------------------------
+class UnderwriteInstRequest(PredictRequest):
+    rent_growth: float = Field(0.03, ge=-0.20, le=0.30)
+    opex_inflation: float = Field(0.03, ge=-0.20, le=0.30)
+
+    occupancy_target: float = Field(0.95, ge=0.0, le=1.0)
+    occupancy_reversion_years: int = Field(2, ge=1, le=10)
+
+    taxes_year1: float = Field(0.0, ge=0.0)
+    insurance_year1: float = Field(0.0, ge=0.0)
+    taxes_inflation: float = Field(0.03, ge=-0.10, le=0.30)
+    insurance_inflation: float = Field(0.04, ge=-0.10, le=0.30)
+
+    reassess_taxes: bool = False
+    reassessed_tax_rate: float = Field(0.02, ge=0.0, le=0.10)
+    reassess_year: int = Field(1, ge=1, le=5)
+
+    capex_reserve_per_sqft: float = Field(0.0, ge=0.0)
+    capex_one_time: Optional[Dict[int, float]] = None
+
+    hold_years: int = Field(5, ge=1, le=30)
+    interest_only_years: int = Field(0, ge=0, le=10)
+
+
+class UnderwriteInstResponse(BaseModel):
+    predicted_noi_next12: float
+    institutional_underwriting: Dict[str, Any]
+
+
+@app.post("/underwrite_inst", response_model=UnderwriteInstResponse)
+def underwrite_inst_endpoint(req: UnderwriteInstRequest):
+    model = get_model()
+
+    payload = req.model_dump()
+
+    exit_cap_rate = payload.pop("exit_cap_rate")
+    selling_cost_pct = payload.pop("selling_cost_pct")
+
+    hold_years = payload.pop("hold_years")
+    interest_only_years = payload.pop("interest_only_years")
+    rent_growth = payload.pop("rent_growth")
+    opex_inflation = payload.pop("opex_inflation")
+    occupancy_target = payload.pop("occupancy_target")
+    occupancy_reversion_years = payload.pop("occupancy_reversion_years")
+    taxes_year1 = payload.pop("taxes_year1")
+    insurance_year1 = payload.pop("insurance_year1")
+    taxes_inflation = payload.pop("taxes_inflation")
+    insurance_inflation = payload.pop("insurance_inflation")
+    reassess_taxes = payload.pop("reassess_taxes")
+    reassessed_tax_rate = payload.pop("reassessed_tax_rate")
+    reassess_year = payload.pop("reassess_year")
+    capex_reserve_per_sqft = payload.pop("capex_reserve_per_sqft")
+    capex_one_time = payload.pop("capex_one_time")
+
+    # ML anchor (not required for the pro forma, but returned for comparison)
+    X = pd.DataFrame([payload])
+    pred_noi = float(model.predict(X)[0])
+
+    uw = underwrite_institutional(
+        InstUnderwriteInputs(
+            purchase_price=req.purchase_price,
+            ltv=req.ltv,
+            interest_rate=req.interest_rate,
+            amort_years=req.amort_years,
+            hold_years=hold_years,
+            interest_only_years=interest_only_years,
+            gross_rent_year1=req.gross_rent_t12,
+            opex_year1=req.opex_t12,
+            occupancy_year1=req.occupancy_t12,
+            gross_leasable_sqft=req.gross_leasable_sqft,
+            rent_growth=rent_growth,
+            opex_inflation=opex_inflation,
+            occupancy_target=occupancy_target,
+            occupancy_reversion_years=occupancy_reversion_years,
+            taxes_year1=taxes_year1,
+            insurance_year1=insurance_year1,
+            taxes_inflation=taxes_inflation,
+            insurance_inflation=insurance_inflation,
+            reassess_taxes=reassess_taxes,
+            reassessed_tax_rate=reassessed_tax_rate,
+            reassess_year=reassess_year,
+            capex_reserve_per_sqft=capex_reserve_per_sqft,
+            capex_one_time=capex_one_time,
+            exit_cap_rate=exit_cap_rate,
+            selling_cost_pct=selling_cost_pct,
+        )
+    )
+
+    return UnderwriteInstResponse(predicted_noi_next12=pred_noi, institutional_underwriting=uw)
