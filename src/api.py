@@ -16,12 +16,13 @@ from src.roi import RoiInputs, compute_roi
 from src.whatif import run_whatif
 from src.underwrite import UnderwriteInputs, underwrite
 from src.underwrite_inst import InstUnderwriteInputs, underwrite_institutional
+from src.whatif_inst import run_whatif_inst
 
 # Path to the trained sklearn Pipeline saved by src.train
 MODEL_PATH = Path("models/model.joblib")
 
 # FastAPI application object
-app = FastAPI(title="CRE NOI + ROI API", version="0.6")
+app = FastAPI(title="CRE NOI + ROI API", version="0.7")
 
 # Cached model instance (loaded once per process)
 _model = None
@@ -206,7 +207,7 @@ def predict_features(req: PredictFeaturesRequest):
 
 
 # =============================================================================
-# 3) /whatif — scenario grid for sensitivity analysis
+# 3) /whatif — scenario grid for sensitivity analysis (simple ROI model)
 # =============================================================================
 class WhatIfRequest(PredictRequest):
     """
@@ -421,7 +422,7 @@ class UnderwriteInstRequest(PredictRequest):
 class UnderwriteInstResponse(BaseModel):
     """
     - predicted_noi_next12: ML output (anchor / comparison)
-    - institutional_underwriting: schedule + cash flows + summary (IRR, DSCR, etc.)
+    - institutional_underwriting: schedule + cash flows + summary (IRR, DSCR, credit metrics)
     """
     predicted_noi_next12: float
     institutional_underwriting: Dict[str, Any]
@@ -527,3 +528,189 @@ def underwrite_inst_endpoint(req: UnderwriteInstRequest):
     )
 
     return UnderwriteInstResponse(predicted_noi_next12=pred_noi, institutional_underwriting=uw)
+
+
+# =============================================================================
+# 6) /whatif_inst — institutional what-if (v2) + credit metrics sorting
+# =============================================================================
+class WhatIfInstRequest(UnderwriteInstRequest):
+    """
+    Institutional what-if request (v2).
+
+    Adds scenario vectors on top of UnderwriteInstRequest.
+
+    The endpoint:
+    - creates scenario combinations (bounded by max_scenarios)
+    - runs institutional underwriting per scenario
+    - sorts results by sort_by
+    - returns the top N
+    """
+    # Primary axes
+    purchase_prices: Optional[List[float]] = None
+    ltvs: Optional[List[float]] = None
+    interest_rates: Optional[List[float]] = None
+    exit_cap_rates: Optional[List[float]] = None
+
+    # Institutional axes
+    rent_growths: Optional[List[float]] = None
+    capex_reserve_per_sqft_values: Optional[List[float]] = None
+    replacement_capex_per_sqft_values: Optional[List[float]] = None
+    occupancy_shock_drops: Optional[List[float]] = None
+    rate_shock_bps_values: Optional[List[float]] = None
+
+    # Controls
+    max_scenarios: int = Field(200, ge=1, le=500)
+    top_n: int = Field(50, ge=1, le=200)
+    sort_by: str = Field("irr")  # irr | min_dscr | debt_yield_year1 | net_sale_proceeds | cash_on_cash_year1
+
+
+class WhatIfInstScenario(BaseModel):
+    """
+    One institutional what-if scenario result.
+
+    - inputs: scenario inputs (what changed)
+    - predicted_noi_next12: ML anchor output
+    - summary: institutional summary (includes DSCR/IRR/credit metrics)
+    """
+    inputs: Dict[str, Any]
+    predicted_noi_next12: float
+    summary: Dict[str, Any]
+
+
+class WhatIfInstResponse(BaseModel):
+    """
+    Institutional what-if response:
+    - scenarios: top ranked scenarios by sort_by
+    """
+    scenarios: List[WhatIfInstScenario]
+
+
+@app.post("/whatif_inst", response_model=WhatIfInstResponse)
+def whatif_inst(req: WhatIfInstRequest):
+    """
+    Institutional what-if scenarios (v2).
+
+    Key idea:
+    - The institutional underwriting is driven by provided line items and pro forma knobs.
+    - The ML NOI prediction is returned only as an anchor/comparison.
+    """
+    model = get_model()
+
+    # Start from request data; then peel off vectors and build ML + underwriting payloads.
+    payload = req.model_dump()
+
+    # Scenario vectors
+    purchase_prices = payload.pop("purchase_prices", None)
+    ltvs = payload.pop("ltvs", None)
+    interest_rates = payload.pop("interest_rates", None)
+    exit_cap_rates = payload.pop("exit_cap_rates", None)
+
+    rent_growths = payload.pop("rent_growths", None)
+    capex_reserve_per_sqft_values = payload.pop("capex_reserve_per_sqft_values", None)
+    replacement_capex_per_sqft_values = payload.pop("replacement_capex_per_sqft_values", None)
+    occupancy_shock_drops = payload.pop("occupancy_shock_drops", None)
+    rate_shock_bps_values = payload.pop("rate_shock_bps_values", None)
+
+    max_scenarios = int(payload.pop("max_scenarios", 200))
+    top_n = int(payload.pop("top_n", 50))
+    sort_by = str(payload.pop("sort_by", "irr"))
+
+    # ROI-only fields (not ML features)
+    exit_cap_rate = payload.pop("exit_cap_rate")
+    selling_cost_pct = payload.pop("selling_cost_pct")
+
+    # Build ML features:
+    # - Remove institutional knobs that the model does not need.
+    # - Keep the base deal snapshot keys consistent with training.
+    #
+    # Note: These keys must match what your training pipeline expects.
+    inst_keys = {
+        "hold_years", "interest_only_years",
+        "rent_growth", "opex_inflation", "occupancy_target", "occupancy_reversion_years",
+        "taxes_year1", "insurance_year1", "taxes_inflation", "insurance_inflation",
+        "reassess_taxes", "reassessed_tax_rate", "reassess_year",
+        "capex_reserve_per_sqft", "replacement_capex_per_sqft", "value_add_capex",
+        "occupancy_shock_year", "occupancy_shock_drop", "occupancy_recovery_years",
+        "rate_shock_year", "rate_shock_bps",
+        "refi_year", "refi_ltv", "refi_rate", "refi_amort_years", "refi_cost_pct",
+    }
+
+    base_ml_features = {k: v for k, v in payload.items() if k not in inst_keys}
+
+    # Build base institutional inputs for InstUnderwriteInputs:
+    base_inst_inputs = {
+        "purchase_price": float(req.purchase_price),
+        "ltv": float(req.ltv),
+        "interest_rate": float(req.interest_rate),
+        "amort_years": int(req.amort_years),
+
+        "gross_rent_year1": float(req.gross_rent_t12),
+        "opex_year1": float(req.opex_t12),
+        "occupancy_year1": float(req.occupancy_t12),
+        "gross_leasable_sqft": float(req.gross_leasable_sqft),
+
+        "hold_years": int(req.hold_years),
+        "exit_cap_rate": float(exit_cap_rate),
+        "selling_cost_pct": float(selling_cost_pct),
+
+        "interest_only_years": int(req.interest_only_years),
+
+        "rent_growth": float(req.rent_growth),
+        "opex_inflation": float(req.opex_inflation),
+        "occupancy_target": float(req.occupancy_target),
+        "occupancy_reversion_years": int(req.occupancy_reversion_years),
+
+        "taxes_year1": float(req.taxes_year1),
+        "insurance_year1": float(req.insurance_year1),
+        "taxes_inflation": float(req.taxes_inflation),
+        "insurance_inflation": float(req.insurance_inflation),
+        "reassess_taxes": bool(req.reassess_taxes),
+        "reassessed_tax_rate": float(req.reassessed_tax_rate),
+        "reassess_year": int(req.reassess_year),
+
+        "capex_reserve_per_sqft": float(req.capex_reserve_per_sqft),
+        "replacement_capex_per_sqft": float(req.replacement_capex_per_sqft),
+        "value_add_capex": req.value_add_capex,
+
+        "occupancy_shock_year": req.occupancy_shock_year,
+        "occupancy_shock_drop": float(req.occupancy_shock_drop),
+        "occupancy_recovery_years": int(req.occupancy_recovery_years),
+
+        "rate_shock_year": req.rate_shock_year,
+        "rate_shock_bps": float(req.rate_shock_bps),
+
+        "refi_year": req.refi_year,
+        "refi_ltv": float(req.refi_ltv),
+        "refi_rate": float(req.refi_rate),
+        "refi_amort_years": int(req.refi_amort_years),
+        "refi_cost_pct": float(req.refi_cost_pct),
+    }
+
+    results = run_whatif_inst(
+        model=model,
+        base_ml_features=base_ml_features,
+        base_inst_inputs=base_inst_inputs,
+        purchase_prices=purchase_prices,
+        ltvs=ltvs,
+        interest_rates=interest_rates,
+        exit_cap_rates=exit_cap_rates,
+        rent_growths=rent_growths,
+        capex_reserve_per_sqft_values=capex_reserve_per_sqft_values,
+        replacement_capex_per_sqft_values=replacement_capex_per_sqft_values,
+        occupancy_shock_drops=occupancy_shock_drops,
+        rate_shock_bps_values=rate_shock_bps_values,
+        max_scenarios=max_scenarios,
+        top_n=top_n,
+        sort_by=sort_by,
+    )
+
+    return WhatIfInstResponse(
+        scenarios=[
+            WhatIfInstScenario(
+                inputs=r.inputs,
+                predicted_noi_next12=r.predicted_noi_next12,
+                summary=r.institutional["summary"],
+            )
+            for r in results
+        ]
+    )

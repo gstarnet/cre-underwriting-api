@@ -1,0 +1,354 @@
+{
+    "scenarios": [
+        {
+            "inputs": {
+                "purchase_price": 24000000.0,
+                "ltv": 0.65,
+                "interest_rate": 0.062,
+                "exit_cap_rate": 0.0625,
+                "rent_growth": 0.03,
+                "capex_reserve_per_sqft": 0.25,
+                "replacement_capex_per_sqft": 0.15,
+                "occupancy_shock_drop": 0.1,
+                "rate_shock_bps": 0.0
+            },
+            "predicted_noi_next12": 1703966.3198586593,
+            "summary": {
+                "loan_amount": 15600000.0,
+                "equity_required": 8400000.0,
+                "exit_value": 19758737.498240005,
+                "selling_costs": 395174.74996480014,
+                "remaining_loan_balance_at_sale": 10476458.235982511,
+                "net_sale_proceeds": 8887104.512292694,
+                "irr": -0.08237167260897577,
+                "cash_on_cash_year1": 0.009857142857142858,
+                "dscr_by_year": [
+                    1.08560794044665,
+                    0.7331414063721746,
+                    0.8507933865496325,
+                    1.4249153893959692,
+                    1.468644088843479
+                ],
+                "min_dscr": 0.7331414063721746,
+                "debt_yield_year1": 0.0673076923076923,
+                "breakeven_occupancy_year1": 0.9123636363636364,
+                "ltv_at_exit": 0.530219010041289
+            }
+        },
+        {
+            "inputs": {
+                "purchase_price": 24000000.0,
+                "ltv": 0.65,
+                "interest_rate": 0.062,
+                "exit_cap_rate": 0.0625,
+                "rent_growth": 0.03,
+                "capex_reserve_per_sqft": 0.25,
+                "replacement_capex_per_sqft": 0.15,
+                "occupancy_shock_drop": 0.0,
+                "rate_shock_bps": 0.0
+            },
+            "predicted_noi_next12": 1703966.3198586593,
+            "summary": {
+                "loan_amount": 15600000.0,
+                "equity_required": 8400000.0,
+                "exit_value": 19758737.498240005,
+                "selling_costs": 395174.74996480014,
+                "remaining_loan_balance_at_sale": 11645587.778466985,
+                "net_sale_proceeds": 7717974.969808221,
+                "irr": -0.08415913064610467,
+                "cash_on_cash_year1": 0.009857142857142858,
+                "dscr_by_year": [
+                    1.08560794044665,
+                    0.9175006955722087,
+                    0.9457384204876506,
+                    1.2818645868968537,
+                    1.3212032533678368
+                ],
+                "min_dscr": 0.9175006955722087,
+                "debt_yield_year1": 0.0673076923076923,
+                "breakeven_occupancy_year1": 0.9123636363636364,
+                "ltv_at_exit": 0.5893892653568734
+            }
+        },
+        {
+            "inputs": {
+                "purchase_price": 24000000.0,
+                "ltv": 0.65,
+                "interest_rate": 0.062,
+                "exit_cap_rate": 0.0625,
+                "rent_growth": 0.03,
+                "capex_reserve_per_sqft": 0.25,
+                "replacement_capex_per_sqft": 0.15,
+                "occupancy_shock_drop": 0.1,
+                "rate_shock_bps": 150.0
+            },
+            "predicted_noi_next12": 1703966.3198586593,
+            "summary": {
+                "loan_amount": 15600000.0,
+                "equity_required": 8400000.0,
+                "exit_value": 19758737.498240005,
+                "selling_costs": 395174.74996480014,
+                "remaining_loan_balance_at_sale": 10555646.365431374,
+                "net_sale_proceeds": 8807916.382843832,
+                "irr": -0.09693713755560489,
+                "cash_on_cash_year1": 0.009857142857142858,
+                "dscr_by_year": [
+                    1.08560794044665,
+                    0.7331414063721746,
+                    0.7427914886622996,
+                    1.2423355108546756,
+                    1.280461084184445
+                ],
+                "min_dscr": 0.7331414063721746,
+                "debt_yield_year1": 0.0673076923076923,
+                "breakeven_occupancy_year1": 0.9123636363636364,
+                "ltv_at_exit": 0.5342267625333659
+            }
+        },
+        {
+            "inputs": {
+                "purchase_price": 24000000.0,
+                "ltv": 0.65,
+                "interest_rate": 0.062,
+                "exit_cap_rate": 0.0625,
+                "rent_growth": 0.03,
+                "capex_reserve_per_sqft": 0.25,
+                "replacement_capex_per_sqft": 0.15,
+                "occupancy_shock_drop": 0.0,
+                "rate_shock_bps": 150.0
+            },
+            "predicted_noi_next12": 1703966.3198586593,
+            "summary": {
+                "loan_amount": 15600000.0,
+                "equity_required": 8400000.0,
+                "exit_value": 19758737.498240005,
+                "selling_costs": 395174.74996480014,
+                "remaining_loan_balance_at_sale": 11733612.97665295,
+                "net_sale_proceeds": 7629949.771622255,
+                "irr": -0.101037461221783,
+                "cash_on_cash_year1": 0.009857142857142858,
+                "dscr_by_year": [
+                    1.08560794044665,
+                    0.9175006955722087,
+                    0.825683956110739,
+                    1.1176143567963666,
+                    1.1519124089265267
+                ],
+                "min_dscr": 0.825683956110739,
+                "debt_yield_year1": 0.0673076923076923,
+                "breakeven_occupancy_year1": 0.9123636363636364,
+                "ltv_at_exit": 0.5938442665022556
+            }
+        },
+        {
+            "inputs": {
+                "purchase_price": 25000000.0,
+                "ltv": 0.65,
+                "interest_rate": 0.062,
+                "exit_cap_rate": 0.0625,
+                "rent_growth": 0.03,
+                "capex_reserve_per_sqft": 0.25,
+                "replacement_capex_per_sqft": 0.15,
+                "occupancy_shock_drop": 0.1,
+                "rate_shock_bps": 0.0
+            },
+            "predicted_noi_next12": 1703966.3198586593,
+            "summary": {
+                "loan_amount": 16250000.0,
+                "equity_required": 8750000.0,
+                "exit_value": 19398574.679040004,
+                "selling_costs": 387971.4935808001,
+                "remaining_loan_balance_at_sale": 10263889.228258064,
+                "net_sale_proceeds": 8746713.95720114,
+                "irr": -0.11372017907752437,
+                "cash_on_cash_year1": 0.0025714285714285713,
+                "dscr_by_year": [
+                    1.022332506203474,
+                    0.6877262121507394,
+                    0.8001894269821027,
+                    1.4278968821559013,
+                    1.471735348189528
+                ],
+                "min_dscr": 0.6877262121507394,
+                "debt_yield_year1": 0.06338461538461539,
+                "breakeven_occupancy_year1": 0.9397727272727273,
+                "ltv_at_exit": 0.529105328514064
+            }
+        },
+        {
+            "inputs": {
+                "purchase_price": 24000000.0,
+                "ltv": 0.65,
+                "interest_rate": 0.062,
+                "exit_cap_rate": 0.0675,
+                "rent_growth": 0.03,
+                "capex_reserve_per_sqft": 0.25,
+                "replacement_capex_per_sqft": 0.15,
+                "occupancy_shock_drop": 0.1,
+                "rate_shock_bps": 0.0
+            },
+            "predicted_noi_next12": 1703966.3198586593,
+            "summary": {
+                "loan_amount": 15600000.0,
+                "equity_required": 8400000.0,
+                "exit_value": 18295127.31318519,
+                "selling_costs": 365902.5462637038,
+                "remaining_loan_balance_at_sale": 9700424.292576399,
+                "net_sale_proceeds": 8228800.474345088,
+                "irr": -0.11421415683300178,
+                "cash_on_cash_year1": 0.009857142857142858,
+                "dscr_by_year": [
+                    1.08560794044665,
+                    0.7331414063721746,
+                    0.8507933865496325,
+                    1.5389086205476468,
+                    1.5861356159509576
+                ],
+                "min_dscr": 0.7331414063721746,
+                "debt_yield_year1": 0.0673076923076923,
+                "breakeven_occupancy_year1": 0.9123636363636364,
+                "ltv_at_exit": 0.530219010041289
+            }
+        },
+        {
+            "inputs": {
+                "purchase_price": 24000000.0,
+                "ltv": 0.65,
+                "interest_rate": 0.062,
+                "exit_cap_rate": 0.0675,
+                "rent_growth": 0.03,
+                "capex_reserve_per_sqft": 0.25,
+                "replacement_capex_per_sqft": 0.15,
+                "occupancy_shock_drop": 0.0,
+                "rate_shock_bps": 0.0
+            },
+            "predicted_noi_next12": 1703966.3198586593,
+            "summary": {
+                "loan_amount": 15600000.0,
+                "equity_required": 8400000.0,
+                "exit_value": 18295127.31318519,
+                "selling_costs": 365902.5462637038,
+                "remaining_loan_balance_at_sale": 10782951.64672869,
+                "net_sale_proceeds": 7146273.120192796,
+                "irr": -0.11798182483254264,
+                "cash_on_cash_year1": 0.009857142857142858,
+                "dscr_by_year": [
+                    1.08560794044665,
+                    0.9175006955722087,
+                    0.9457384204876506,
+                    1.3844137538486017,
+                    1.4268995136372635
+                ],
+                "min_dscr": 0.9175006955722087,
+                "debt_yield_year1": 0.0673076923076923,
+                "breakeven_occupancy_year1": 0.9123636363636364,
+                "ltv_at_exit": 0.5893892653568735
+            }
+        },
+        {
+            "inputs": {
+                "purchase_price": 25000000.0,
+                "ltv": 0.65,
+                "interest_rate": 0.062,
+                "exit_cap_rate": 0.0625,
+                "rent_growth": 0.03,
+                "capex_reserve_per_sqft": 0.25,
+                "replacement_capex_per_sqft": 0.15,
+                "occupancy_shock_drop": 0.0,
+                "rate_shock_bps": 0.0
+            },
+            "predicted_noi_next12": 1703966.3198586593,
+            "summary": {
+                "loan_amount": 16250000.0,
+                "equity_required": 8750000.0,
+                "exit_value": 19398574.679040004,
+                "selling_costs": 387971.4935808001,
+                "remaining_loan_balance_at_sale": 11433018.770742536,
+                "net_sale_proceeds": 7577584.414716668,
+                "irr": -0.11814295033564565,
+                "cash_on_cash_year1": 0.0025714285714285713,
+                "dscr_by_year": [
+                    1.022332506203474,
+                    0.8647111297827722,
+                    0.8913366595626,
+                    1.2818815154338619,
+                    1.3212371019441667
+                ],
+                "min_dscr": 0.8647111297827722,
+                "debt_yield_year1": 0.06338461538461539,
+                "breakeven_occupancy_year1": 0.9397727272727273,
+                "ltv_at_exit": 0.589374165881157
+            }
+        },
+        {
+            "inputs": {
+                "purchase_price": 24000000.0,
+                "ltv": 0.65,
+                "interest_rate": 0.062,
+                "exit_cap_rate": 0.0625,
+                "rent_growth": 0.02,
+                "capex_reserve_per_sqft": 0.25,
+                "replacement_capex_per_sqft": 0.15,
+                "occupancy_shock_drop": 0.1,
+                "rate_shock_bps": 0.0
+            },
+            "predicted_noi_next12": 1703966.3198586593,
+            "summary": {
+                "loan_amount": 15600000.0,
+                "equity_required": 8400000.0,
+                "exit_value": 18287928.36064,
+                "selling_costs": 365758.56721280003,
+                "remaining_loan_balance_at_sale": 10060777.527692247,
+                "net_sale_proceeds": 7861392.265734952,
+                "irr": -0.12365043713016508,
+                "cash_on_cash_year1": 0.009857142857142858,
+                "dscr_by_year": [
+                    1.08560794044665,
+                    0.7175693110708125,
+                    0.8170359477698982,
+                    1.4004919828046605,
+                    1.4154835360703595
+                ],
+                "min_dscr": 0.7175693110708125,
+                "debt_yield_year1": 0.0673076923076923,
+                "breakeven_occupancy_year1": 0.9123636363636364,
+                "ltv_at_exit": 0.5501321598210899
+            }
+        },
+        {
+            "inputs": {
+                "purchase_price": 25000000.0,
+                "ltv": 0.65,
+                "interest_rate": 0.062,
+                "exit_cap_rate": 0.0625,
+                "rent_growth": 0.03,
+                "capex_reserve_per_sqft": 0.25,
+                "replacement_capex_per_sqft": 0.15,
+                "occupancy_shock_drop": 0.1,
+                "rate_shock_bps": 150.0
+            },
+            "predicted_noi_next12": 1703966.3198586593,
+            "summary": {
+                "loan_amount": 16250000.0,
+                "equity_required": 8750000.0,
+                "exit_value": 19398574.679040004,
+                "selling_costs": 387971.4935808001,
+                "remaining_loan_balance_at_sale": 10341470.617936544,
+                "net_sale_proceeds": 8669132.56752266,
+                "irr": -0.1282681863201106,
+                "cash_on_cash_year1": 0.0025714285714285713,
+                "dscr_by_year": [
+                    1.022332506203474,
+                    0.6877262121507394,
+                    0.6986113257066255,
+                    1.2449349735024824,
+                    1.2831562486043377
+                ],
+                "min_dscr": 0.6877262121507394,
+                "debt_yield_year1": 0.06338461538461539,
+                "breakeven_occupancy_year1": 0.9397727272727273,
+                "ltv_at_exit": 0.5331046630508589
+            }
+        }
+    ]
+}
