@@ -13,7 +13,7 @@ from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-from src.data_load import load_cre_csv, time_split, CRE_TARGET, TIME_COL
+from src.data_load import load_cre_csv, time_split, TIME_COL
 
 REPORTS_DIR = Path("reports")
 REPORTS_DIR.mkdir(exist_ok=True, parents=True)

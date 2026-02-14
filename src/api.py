@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 # Standard library
+from contextlib import asynccontextmanager  # NEW: lifespan hook replaces deprecated app.on_event
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -21,11 +22,34 @@ from src.whatif_inst import run_whatif_inst
 # Path to the trained sklearn Pipeline saved by src.train
 MODEL_PATH = Path("models/model.joblib")
 
-# FastAPI application object
-app = FastAPI(title="CRE NOI + ROI API", version="0.7")
-
 # Cached model instance (loaded once per process)
 _model = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan hook (preferred in modern FastAPI; replaces deprecated app.on_event).
+
+    Startup checks to fail fast in production-like runs (including Docker).
+
+    Why:
+    - If models/model.joblib is missing, every prediction endpoint will fail.
+    - In a container/orchestrator, failing fast is better than serving broken endpoints.
+
+    Note:
+    - We do NOT auto-train here. Training should be an explicit step so runtime is predictable.
+    """
+    if not MODEL_PATH.exists():
+        raise RuntimeError(
+            f"Missing model artifact at {MODEL_PATH}. "
+            f"Train first: python -m src.train"
+        )
+    yield
+
+
+# FastAPI application object
+app = FastAPI(title="CRE NOI + ROI API", version="0.8", lifespan=lifespan)
 
 
 def get_model():
@@ -561,7 +585,9 @@ class WhatIfInstRequest(UnderwriteInstRequest):
     # Controls
     max_scenarios: int = Field(200, ge=1, le=500)
     top_n: int = Field(50, ge=1, le=200)
-    sort_by: str = Field("irr")  # irr | min_dscr | debt_yield_year1 | net_sale_proceeds | cash_on_cash_year1
+    sort_by: str = Field(
+        "irr"
+    )  # irr | min_dscr | debt_yield_year1 | net_sale_proceeds | cash_on_cash_year1
 
 
 class WhatIfInstScenario(BaseModel):
@@ -625,14 +651,32 @@ def whatif_inst(req: WhatIfInstRequest):
     #
     # Note: These keys must match what your training pipeline expects.
     inst_keys = {
-        "hold_years", "interest_only_years",
-        "rent_growth", "opex_inflation", "occupancy_target", "occupancy_reversion_years",
-        "taxes_year1", "insurance_year1", "taxes_inflation", "insurance_inflation",
-        "reassess_taxes", "reassessed_tax_rate", "reassess_year",
-        "capex_reserve_per_sqft", "replacement_capex_per_sqft", "value_add_capex",
-        "occupancy_shock_year", "occupancy_shock_drop", "occupancy_recovery_years",
-        "rate_shock_year", "rate_shock_bps",
-        "refi_year", "refi_ltv", "refi_rate", "refi_amort_years", "refi_cost_pct",
+        "hold_years",
+        "interest_only_years",
+        "rent_growth",
+        "opex_inflation",
+        "occupancy_target",
+        "occupancy_reversion_years",
+        "taxes_year1",
+        "insurance_year1",
+        "taxes_inflation",
+        "insurance_inflation",
+        "reassess_taxes",
+        "reassessed_tax_rate",
+        "reassess_year",
+        "capex_reserve_per_sqft",
+        "replacement_capex_per_sqft",
+        "value_add_capex",
+        "occupancy_shock_year",
+        "occupancy_shock_drop",
+        "occupancy_recovery_years",
+        "rate_shock_year",
+        "rate_shock_bps",
+        "refi_year",
+        "refi_ltv",
+        "refi_rate",
+        "refi_amort_years",
+        "refi_cost_pct",
     }
 
     base_ml_features = {k: v for k, v in payload.items() if k not in inst_keys}
@@ -643,23 +687,18 @@ def whatif_inst(req: WhatIfInstRequest):
         "ltv": float(req.ltv),
         "interest_rate": float(req.interest_rate),
         "amort_years": int(req.amort_years),
-
         "gross_rent_year1": float(req.gross_rent_t12),
         "opex_year1": float(req.opex_t12),
         "occupancy_year1": float(req.occupancy_t12),
         "gross_leasable_sqft": float(req.gross_leasable_sqft),
-
         "hold_years": int(req.hold_years),
         "exit_cap_rate": float(exit_cap_rate),
         "selling_cost_pct": float(selling_cost_pct),
-
         "interest_only_years": int(req.interest_only_years),
-
         "rent_growth": float(req.rent_growth),
         "opex_inflation": float(req.opex_inflation),
         "occupancy_target": float(req.occupancy_target),
         "occupancy_reversion_years": int(req.occupancy_reversion_years),
-
         "taxes_year1": float(req.taxes_year1),
         "insurance_year1": float(req.insurance_year1),
         "taxes_inflation": float(req.taxes_inflation),
@@ -667,18 +706,14 @@ def whatif_inst(req: WhatIfInstRequest):
         "reassess_taxes": bool(req.reassess_taxes),
         "reassessed_tax_rate": float(req.reassessed_tax_rate),
         "reassess_year": int(req.reassess_year),
-
         "capex_reserve_per_sqft": float(req.capex_reserve_per_sqft),
         "replacement_capex_per_sqft": float(req.replacement_capex_per_sqft),
         "value_add_capex": req.value_add_capex,
-
         "occupancy_shock_year": req.occupancy_shock_year,
         "occupancy_shock_drop": float(req.occupancy_shock_drop),
         "occupancy_recovery_years": int(req.occupancy_recovery_years),
-
         "rate_shock_year": req.rate_shock_year,
         "rate_shock_bps": float(req.rate_shock_bps),
-
         "refi_year": req.refi_year,
         "refi_ltv": float(req.refi_ltv),
         "refi_rate": float(req.refi_rate),
