@@ -11,10 +11,11 @@ from pydantic import BaseModel, Field
 
 from src.roi import RoiInputs, compute_roi
 from src.whatif import run_whatif
+from src.underwrite import UnderwriteInputs, underwrite
 
 MODEL_PATH = Path("models/model.joblib")
 
-app = FastAPI(title="CRE NOI + ROI API", version="0.3")
+app = FastAPI(title="CRE NOI + ROI API", version="0.4")
 
 _model = None
 
@@ -33,17 +34,21 @@ def health():
     return {"status": "ok"}
 
 
-# --- Existing “typed” request (kept) ---
-
+# -----------------------
+# Typed prediction schema
+# -----------------------
 class PredictRequest(BaseModel):
+    # Identifiers / time (kept for compatibility; model drops these)
     deal_id: Optional[str] = None
-    asof_date: Optional[str] = None
+    asof_date: Optional[str] = None  # YYYY-MM-DD
 
+    # Categorical
     property_type: str
     city: str
     state: str
     zip: str
 
+    # Numeric
     year_built: int
     gross_leasable_sqft: float
     units: Optional[float] = None
@@ -58,6 +63,7 @@ class PredictRequest(BaseModel):
     interest_rate: float = Field(..., ge=0.0, le=1.0)
     amort_years: int = Field(..., ge=1, le=40)
 
+    # ROI assumptions (not used by ML model)
     exit_cap_rate: float = Field(0.065, ge=0.0001, le=1.0)
     selling_cost_pct: float = Field(0.02, ge=0.0, le=0.2)
 
@@ -93,14 +99,13 @@ def predict(req: PredictRequest):
     return PredictResponse(predicted_noi_next12=pred_noi, roi=roi_out.__dict__)
 
 
-# --- New generic endpoint (future-proof) ---
-
+# -----------------------------------------
+# Generic prediction schema (future-proof)
+# -----------------------------------------
 class PredictFeaturesRequest(BaseModel):
     features: Dict[str, Any]
-
-    # ROI fields are optional; if absent, ROI is not computed
-    exit_cap_rate: Optional[float] = Field(0.065, ge=0.0001, le=1.0)
-    selling_cost_pct: Optional[float] = Field(0.02, ge=0.0, le=0.2)
+    exit_cap_rate: float = Field(0.065, ge=0.0001, le=1.0)
+    selling_cost_pct: float = Field(0.02, ge=0.0, le=0.2)
 
 
 class PredictFeaturesResponse(BaseModel):
@@ -116,7 +121,6 @@ def predict_features(req: PredictFeaturesRequest):
     pred_noi = float(model.predict(X)[0])
 
     roi = None
-    # Compute ROI only if required inputs exist
     f = req.features
     required = ["purchase_price", "ltv", "interest_rate", "amort_years"]
     if all(k in f and f[k] is not None for k in required):
@@ -127,8 +131,8 @@ def predict_features(req: PredictFeaturesRequest):
                 ltv=float(f["ltv"]),
                 interest_rate=float(f["interest_rate"]),
                 amort_years=int(f["amort_years"]),
-                exit_cap_rate=float(req.exit_cap_rate or 0.065),
-                selling_cost_pct=float(req.selling_cost_pct or 0.02),
+                exit_cap_rate=float(req.exit_cap_rate),
+                selling_cost_pct=float(req.selling_cost_pct),
             )
         )
         roi = roi_out.__dict__
@@ -136,8 +140,9 @@ def predict_features(req: PredictFeaturesRequest):
     return PredictFeaturesResponse(predicted_noi_next12=pred_noi, roi=roi)
 
 
-# --- What-if endpoint (unchanged behavior) ---
-
+# -----------------------
+# What-if sensitivity API
+# -----------------------
 class WhatIfRequest(PredictRequest):
     purchase_prices: Optional[List[float]] = None
     ltvs: Optional[List[float]] = None
@@ -145,7 +150,7 @@ class WhatIfRequest(PredictRequest):
     exit_cap_rates: Optional[List[float]] = None
 
     max_scenarios: int = Field(200, ge=1, le=500)
-    sort_by: str = Field("cash_on_cash")
+    sort_by: str = Field("cash_on_cash")  # cash_on_cash | annual_cash_flow | estimated_exit_proceeds
 
 
 class WhatIfScenario(BaseModel):
@@ -168,6 +173,7 @@ def whatif(req: WhatIfRequest):
     model = get_model()
 
     payload = req.model_dump()
+
     purchase_prices = payload.pop("purchase_prices", None)
     ltvs = payload.pop("ltvs", None)
     interest_rates = payload.pop("interest_rates", None)
@@ -176,7 +182,7 @@ def whatif(req: WhatIfRequest):
     sort_by = payload.pop("sort_by", "cash_on_cash")
 
     selling_cost_pct = payload.pop("selling_cost_pct")
-    payload.pop("exit_cap_rate", None)
+    payload.pop("exit_cap_rate", None)  # ROI-only; not a model feature
 
     results = run_whatif(
         model=model,
@@ -206,3 +212,46 @@ def whatif(req: WhatIfRequest):
             for r in results
         ]
     )
+
+
+# -----------------------
+# Multi-year underwriting
+# -----------------------
+class UnderwriteRequest(PredictRequest):
+    hold_years: int = Field(5, ge=1, le=30)
+    noi_growth: float = Field(0.03, ge=-0.20, le=0.30)
+
+
+class UnderwriteResponse(BaseModel):
+    predicted_noi_next12: float
+    underwriting: Dict[str, Any]
+
+
+@app.post("/underwrite", response_model=UnderwriteResponse)
+def underwrite_endpoint(req: UnderwriteRequest):
+    model = get_model()
+
+    payload = req.model_dump()
+    exit_cap_rate = payload.pop("exit_cap_rate")
+    selling_cost_pct = payload.pop("selling_cost_pct")
+    hold_years = payload.pop("hold_years")
+    noi_growth = payload.pop("noi_growth")
+
+    X = pd.DataFrame([payload])
+    pred_noi = float(model.predict(X)[0])
+
+    uw = underwrite(
+        UnderwriteInputs(
+            purchase_price=req.purchase_price,
+            noi_year1=pred_noi,
+            ltv=req.ltv,
+            interest_rate=req.interest_rate,
+            amort_years=req.amort_years,
+            hold_years=hold_years,
+            noi_growth=noi_growth,
+            exit_cap_rate=exit_cap_rate,
+            selling_cost_pct=selling_cost_pct,
+        )
+    )
+
+    return UnderwriteResponse(predicted_noi_next12=pred_noi, underwriting=uw)
