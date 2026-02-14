@@ -49,7 +49,12 @@ async def lifespan(app: FastAPI):
 
 
 # FastAPI application object
-app = FastAPI(title="CRE NOI + ROI API", version="0.8", lifespan=lifespan)
+app = FastAPI(
+    title="CRE Underwriting API",
+    description="Local commercial real estate NOI prediction + underwriting + what-if scenarios.",
+    version="0.8",
+    lifespan=lifespan,
+)
 
 
 def get_model():

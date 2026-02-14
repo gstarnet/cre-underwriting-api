@@ -1,0 +1,12 @@
+.venv
+.idea
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
+.git/
+reports/
+# Ignore everything in models/ by default...
+models/*
+# ...but include the packaged model artifact
+!models/model.joblib
