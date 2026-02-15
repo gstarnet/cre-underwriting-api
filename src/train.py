@@ -1,97 +1,284 @@
-# src/train.py
+"""
+Train a baseline tabular model for CRE NOI forecasting.
+
+Outputs:
+- models/model.joblib              (trained sklearn Pipeline)
+- reports/metrics.csv              (model metrics on holdout split)
+- reports/feature_importance.csv   (permutation importance; model-agnostic)
+- reports/feature_importance.json  (same content for API consumption)
+
+Notes:
+- This project uses a time-based split (see src/data_load.time_split()) to avoid leakage.
+- Explainability here is intentionally simple and production-friendly:
+  permutation importance on the test fold (model-agnostic, works for any sklearn estimator).
+"""
+
 from __future__ import annotations
 
+# Standard library
+from dataclasses import asdict
 from pathlib import Path
+from typing import Dict, Any, List, Tuple
+
+# Third-party
 import joblib
 import numpy as np
 import pandas as pd
 
 from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.impute import SimpleImputer
+from sklearn.inspection import permutation_importance
+from sklearn.linear_model import Ridge
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
+# Local
 from src.data_load import load_cre_csv, time_split, CRE_TARGET, TIME_COL
 
-REPORTS_DIR = Path("reports")
+
+# -----------------------------------------------------------------------------
+# Paths
+# -----------------------------------------------------------------------------
 MODELS_DIR = Path("models")
-REPORTS_DIR.mkdir(exist_ok=True, parents=True)
-MODELS_DIR.mkdir(exist_ok=True, parents=True)
+REPORTS_DIR = Path("reports")
+
+MODEL_PATH = MODELS_DIR / "model.joblib"
+METRICS_CSV = REPORTS_DIR / "metrics.csv"
+FEATURE_IMPORTANCE_CSV = REPORTS_DIR / "feature_importance.csv"
+FEATURE_IMPORTANCE_JSON = REPORTS_DIR / "feature_importance.json"
 
 
-def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
-    numeric_cols = X.select_dtypes(include=["number", "bool"]).columns.tolist()
-    categorical_cols = [c for c in X.columns if c not in numeric_cols]
+# -----------------------------------------------------------------------------
+# Utilities
+# -----------------------------------------------------------------------------
+def _ensure_dirs() -> None:
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    drop_cols = [c for c in ["deal_id", TIME_COL] if c in X.columns]
-    numeric_cols = [c for c in numeric_cols if c not in drop_cols]
-    categorical_cols = [c for c in categorical_cols if c not in drop_cols]
 
-    numeric_pipe = Pipeline(
-        steps=[
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
-        ]
-    )
+def _infer_feature_cols(df: pd.DataFrame) -> Tuple[List[str], List[str]]:
+    """
+    Infer categorical vs numeric feature columns from the raw dataframe.
 
-    categorical_pipe = Pipeline(
+    We explicitly exclude:
+    - target column (CRE_TARGET)
+    - time column (TIME_COL)
+    """
+    feature_cols = [c for c in df.columns if c not in {CRE_TARGET, TIME_COL}]
+    cat_cols = [c for c in feature_cols if df[c].dtype == "object"]
+    num_cols = [c for c in feature_cols if c not in cat_cols]
+    return cat_cols, num_cols
+
+
+def _build_preprocessor(cat_cols: List[str], num_cols: List[str]) -> ColumnTransformer:
+    """
+    Preprocessor:
+    - categorical: impute missing, one-hot encode (handle_unknown to avoid crashes)
+    - numeric: impute missing, standardize
+
+    NOTE:
+    - We keep OneHotEncoder sparse output (default) since it's efficient for many categories.
+    - Tree model (HGB) expects dense after preprocessing; we handle that via a small adapter in pipeline.
+    """
+    cat_pipe = Pipeline(
         steps=[
             ("imputer", SimpleImputer(strategy="most_frequent")),
-            ("onehot", OneHotEncoder(handle_unknown="ignore")),
+            ("ohe", OneHotEncoder(handle_unknown="ignore")),
+        ]
+    )
+    num_pipe = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler(with_mean=False)),  # with_mean=False supports sparse safely
         ]
     )
 
     return ColumnTransformer(
         transformers=[
-            ("num", numeric_pipe, numeric_cols),
-            ("cat", categorical_pipe, categorical_cols),
+            ("cat", cat_pipe, cat_cols),
+            ("num", num_pipe, num_cols),
         ],
         remainder="drop",
     )
 
 
-def eval_regression(y_true, y_pred) -> dict:
-    mse = mean_squared_error(y_true, y_pred)  # old sklearn compatible
-    rmse = float(mse ** 0.5)
-    mae = float(mean_absolute_error(y_true, y_pred))
+def _to_dense_if_needed(X):
+    """
+    HistGradientBoostingRegressor requires dense input.
+    If preprocessing yields a sparse matrix, convert to dense.
 
-    r2 = None
-    if len(y_true) >= 2:
-        r2 = float(r2_score(y_true, y_pred))
+    This is intentionally localized to keep the rest of the pipeline standard.
+    """
+    # scipy sparse matrices have .toarray()
+    if hasattr(X, "toarray"):
+        return X.toarray()
+    return X
 
-    return {"mae": mae, "rmse": rmse, "r2": r2}
+
+class _DenseAdapter:
+    """
+    A tiny transformer used inside sklearn Pipeline to convert sparse -> dense
+    only for models that require dense matrices.
+    """
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        return _to_dense_if_needed(X)
 
 
+def _eval_regression(y_true: pd.Series, y_pred: np.ndarray) -> Dict[str, float]:
+    """
+    Regression metrics.
+    """
+    mae = mean_absolute_error(y_true, y_pred)
+    rmse = mean_squared_error(y_true, y_pred) ** 0.5  # sklearn version-safe (no squared=)
+    r2 = r2_score(y_true, y_pred) if len(y_true) >= 2 else float("nan")
+    return {"mae": float(mae), "rmse": float(rmse), "r2": float(r2)}
+
+
+def _save_metrics(rows: List[Dict[str, Any]]) -> None:
+    """
+    Save metrics table to reports/metrics.csv.
+    """
+    df = pd.DataFrame(rows)
+    df.to_csv(METRICS_CSV, index=False)
+
+
+def _save_permutation_importance(model: Pipeline, X_test: pd.DataFrame, y_test: pd.Series) -> None:
+    """
+    Compute and store permutation importance.
+
+    IMPORTANT FIX:
+    - permutation_importance(model, X_test, ...) returns importances per *input column* of X_test
+      (because it permutes columns of X_test before passing into the pipeline).
+    - Therefore, feature names MUST match X_test.columns, NOT the expanded OHE feature names.
+      Using get_feature_names_out() will often cause length mismatches.
+
+    Outputs:
+    - reports/feature_importance.csv
+    - reports/feature_importance.json
+    """
+    if not isinstance(X_test, pd.DataFrame):
+        # safety: ensure we have column names
+        X_test = pd.DataFrame(X_test)
+
+    result = permutation_importance(
+        model,
+        X_test,
+        y_test,
+        n_repeats=10,
+        random_state=42,
+        scoring="neg_mean_absolute_error",
+    )
+
+    importances_mean = result.importances_mean
+    importances_std = result.importances_std
+
+    # Use *original* input feature names (matches permutation_importance length)
+    feature_names = list(X_test.columns)
+
+    if len(feature_names) != len(importances_mean):
+        raise RuntimeError(
+            f"Permutation importance length mismatch: "
+            f"features={len(feature_names)} importances={len(importances_mean)}. "
+            f"Ensure X_test is a DataFrame with the same columns used for training."
+        )
+
+    fi = pd.DataFrame(
+        {
+            "feature": feature_names,
+            "importance_mean": importances_mean,
+            "importance_std": importances_std,
+        }
+    ).sort_values("importance_mean", ascending=False)
+
+    fi.to_csv(FEATURE_IMPORTANCE_CSV, index=False)
+
+    # JSON artifact for API usage (top-to-bottom order)
+    payload = {
+        "scoring": "neg_mean_absolute_error",
+        "n_repeats": 10,
+        "rows": [
+            {
+                "feature": r["feature"],
+                "importance_mean": float(r["importance_mean"]),
+                "importance_std": float(r["importance_std"]),
+            }
+            for r in fi.to_dict(orient="records")
+        ],
+    }
+    FEATURE_IMPORTANCE_JSON.write_text(pd.Series(payload).to_json(), encoding="utf-8")
+
+
+# -----------------------------------------------------------------------------
+# Main training flow
+# -----------------------------------------------------------------------------
 def main() -> None:
-    df = load_cre_csv("data/raw/cre_deals.csv")
-    ds = time_split(df, test_frac=0.2)
+    _ensure_dirs()
 
-    pre = build_preprocessor(ds.X_train)
-
-    model = HistGradientBoostingRegressor(random_state=42)
-    pipe = Pipeline(steps=[("pre", pre), ("model", model)])
-
-    pipe.fit(ds.X_train, ds.y_train)
-    pred = pipe.predict(ds.X_test)
-
-    if not np.isfinite(pred).all():
-        raise RuntimeError("Non-finite predictions detected for HGB (unexpected).")
-
-    metrics = eval_regression(ds.y_test, pred)
-    metrics_df = pd.DataFrame([{"model": "hgb", **metrics}])
-
-    metrics_path = REPORTS_DIR / "metrics.csv"
-    metrics_df.to_csv(metrics_path, index=False)
-
-    model_path = MODELS_DIR / "model.joblib"
-    joblib.dump(pipe, model_path)
+    df = load_cre_csv()
+    ds = time_split(df)
 
     print(f"Target: {CRE_TARGET}")
-    print("Saved metrics:", metrics_path)
-    print(metrics_df.to_string(index=False))
-    print("Saved model:", model_path, "best= hgb")
+
+    cat_cols, num_cols = _infer_feature_cols(df)
+
+    pre = _build_preprocessor(cat_cols, num_cols)
+
+    # Candidate models:
+    # - ridge: stable baseline, handles sparse well
+    # - hgb: tree model; requires dense input -> DenseAdapter
+    ridge_pipe = Pipeline(
+        steps=[
+            ("pre", pre),
+            ("model", Ridge(alpha=1.0, random_state=42)),
+        ]
+    )
+
+    hgb_pipe = Pipeline(
+        steps=[
+            ("pre", pre),
+            ("dense", _DenseAdapter()),
+            ("model", HistGradientBoostingRegressor(random_state=42)),
+        ]
+    )
+
+    candidates = [
+        ("ridge", ridge_pipe),
+        ("hgb", hgb_pipe),
+    ]
+
+    metrics_rows: List[Dict[str, Any]] = []
+    best_name = None
+    best_pipe = None
+    best_rmse = float("inf")
+
+    for name, pipe in candidates:
+        pipe.fit(ds.X_train, ds.y_train)
+        pred = pipe.predict(ds.X_test)
+        m = _eval_regression(ds.y_test, pred)
+        m["model"] = name
+        metrics_rows.append(m)
+
+        if m["rmse"] < best_rmse:
+            best_rmse = m["rmse"]
+            best_name = name
+            best_pipe = pipe
+
+    _save_metrics(metrics_rows)
+    print(f"Saved metrics: {METRICS_CSV}")
+
+    # Save best model
+    joblib.dump(best_pipe, MODEL_PATH)
+    print(f"Saved model: {MODEL_PATH} best= {best_name}")
+
+    # Explainability artifacts on the chosen best model (test fold)
+    _save_permutation_importance(best_pipe, ds.X_test, ds.y_test)
+    print(f"Saved feature importance: {FEATURE_IMPORTANCE_CSV} and {FEATURE_IMPORTANCE_JSON}")
 
 
 if __name__ == "__main__":

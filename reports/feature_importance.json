@@ -1,0 +1,181 @@
+{
+  "target": "noi_next12",
+  "method": "permutation_importance",
+  "scoring": "neg_mean_absolute_error",
+  "n_repeats": 10,
+  "rows_test": 17,
+  "feature_importance": [
+    {
+      "feature": "noi_t12",
+      "importance_mean": 638883.3606679073,
+      "importance_std": 50883.370972289515
+    },
+    {
+      "feature": "gross_rent_t12",
+      "importance_mean": 364542.40527685324,
+      "importance_std": 25388.430925133787
+    },
+    {
+      "feature": "opex_t12",
+      "importance_mean": 121867.65379713332,
+      "importance_std": 10433.016783884428
+    },
+    {
+      "feature": "purchase_price",
+      "importance_mean": 65892.40039790412,
+      "importance_std": 7037.2452463419495
+    },
+    {
+      "feature": "gross_leasable_sqft",
+      "importance_mean": 49896.08614931344,
+      "importance_std": 3651.6668956994477
+    },
+    {
+      "feature": "city",
+      "importance_mean": 4649.739798430959,
+      "importance_std": 2982.6626593278297
+    },
+    {
+      "feature": "occupancy_t12",
+      "importance_mean": 2121.3681499115382,
+      "importance_std": 2679.6619966947133
+    },
+    {
+      "feature": "amort_years",
+      "importance_mean": 1792.1143514541895,
+      "importance_std": 848.578407326637
+    },
+    {
+      "feature": "zip",
+      "importance_mean": 1126.5451304989808,
+      "importance_std": 616.788735632818
+    },
+    {
+      "feature": "ltv",
+      "importance_mean": 514.3713345968878,
+      "importance_std": 186.0948094416128
+    },
+    {
+      "feature": "property_type",
+      "importance_mean": 355.91942578387096,
+      "importance_std": 3611.8631466009974
+    },
+    {
+      "feature": "year_built",
+      "importance_mean": 129.7876033605804,
+      "importance_std": 417.9779924352208
+    },
+    {
+      "feature": "deal_id",
+      "importance_mean": 0.0,
+      "importance_std": 0.0
+    },
+    {
+      "feature": "asof_date",
+      "importance_mean": 0.0,
+      "importance_std": 0.0
+    },
+    {
+      "feature": "interest_rate",
+      "importance_mean": -322.11464438266995,
+      "importance_std": 141.02420067362772
+    },
+    {
+      "feature": "state",
+      "importance_mean": -782.6257578980469,
+      "importance_std": 487.80347401443555
+    },
+    {
+      "feature": "units",
+      "importance_mean": -1240.7297673527632,
+      "importance_std": 915.3418893013142
+    }
+  ],
+  "rows": [
+    {
+      "feature": "noi_t12",
+      "importance_mean": 638883.3606679073,
+      "importance_std": 50883.370972289515
+    },
+    {
+      "feature": "gross_rent_t12",
+      "importance_mean": 364542.40527685324,
+      "importance_std": 25388.430925133787
+    },
+    {
+      "feature": "opex_t12",
+      "importance_mean": 121867.65379713332,
+      "importance_std": 10433.016783884428
+    },
+    {
+      "feature": "purchase_price",
+      "importance_mean": 65892.40039790412,
+      "importance_std": 7037.2452463419495
+    },
+    {
+      "feature": "gross_leasable_sqft",
+      "importance_mean": 49896.08614931344,
+      "importance_std": 3651.6668956994477
+    },
+    {
+      "feature": "city",
+      "importance_mean": 4649.739798430959,
+      "importance_std": 2982.6626593278297
+    },
+    {
+      "feature": "occupancy_t12",
+      "importance_mean": 2121.3681499115382,
+      "importance_std": 2679.6619966947133
+    },
+    {
+      "feature": "amort_years",
+      "importance_mean": 1792.1143514541895,
+      "importance_std": 848.578407326637
+    },
+    {
+      "feature": "zip",
+      "importance_mean": 1126.5451304989808,
+      "importance_std": 616.788735632818
+    },
+    {
+      "feature": "ltv",
+      "importance_mean": 514.3713345968878,
+      "importance_std": 186.0948094416128
+    },
+    {
+      "feature": "property_type",
+      "importance_mean": 355.91942578387096,
+      "importance_std": 3611.8631466009974
+    },
+    {
+      "feature": "year_built",
+      "importance_mean": 129.7876033605804,
+      "importance_std": 417.9779924352208
+    },
+    {
+      "feature": "deal_id",
+      "importance_mean": 0.0,
+      "importance_std": 0.0
+    },
+    {
+      "feature": "asof_date",
+      "importance_mean": 0.0,
+      "importance_std": 0.0
+    },
+    {
+      "feature": "interest_rate",
+      "importance_mean": -322.11464438266995,
+      "importance_std": 141.02420067362772
+    },
+    {
+      "feature": "state",
+      "importance_mean": -782.6257578980469,
+      "importance_std": 487.80347401443555
+    },
+    {
+      "feature": "units",
+      "importance_mean": -1240.7297673527632,
+      "importance_std": 915.3418893013142
+    }
+  ]
+}
