@@ -345,6 +345,7 @@ def whatif(req: WhatIfRequest):
     ltvs = payload.pop("ltvs", None)
     interest_rates = payload.pop("interest_rates", None)
     exit_cap_rates = payload.pop("exit_cap_rates", None)
+    base_exit_cap_rate = float(payload.get("exit_cap_rate", req.exit_cap_rate))
     max_scenarios = payload.pop("max_scenarios", 200)
     sort_by = payload.pop("sort_by", "cash_on_cash")
 
@@ -358,6 +359,7 @@ def whatif(req: WhatIfRequest):
         ltvs=ltvs,
         interest_rates=interest_rates,
         exit_cap_rates=exit_cap_rates,
+        base_exit_cap_rate=base_exit_cap_rate,
         selling_cost_pct=selling_cost_pct,
         amort_years=req.amort_years,
         max_scenarios=max_scenarios,

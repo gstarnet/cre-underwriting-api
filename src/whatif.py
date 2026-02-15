@@ -40,6 +40,7 @@ def run_whatif(
         ltvs: Optional[Iterable[float]] = None,
         interest_rates: Optional[Iterable[float]] = None,
         exit_cap_rates: Optional[Iterable[float]] = None,
+        base_exit_cap_rate: float = 0.065,
         selling_cost_pct: float = 0.02,
         amort_years: int,
         max_scenarios: int = 300,
@@ -55,7 +56,7 @@ def run_whatif(
     pp_list = _dedupe_sorted(purchase_prices) or [float(base_features["purchase_price"])]
     ltv_list = _dedupe_sorted(ltvs) or [float(base_features["ltv"])]
     ir_list = _dedupe_sorted(interest_rates) or [float(base_features["interest_rate"])]
-    exit_caps = _dedupe_sorted(exit_cap_rates) or [0.065]
+    exit_caps = _dedupe_sorted(exit_cap_rates) or [float(base_exit_cap_rate)]
 
     results: List[ScenarioResult] = []
 
