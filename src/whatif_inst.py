@@ -80,7 +80,7 @@ def _sort_key(result: WhatIfInstScenarioResult, sort_by: str) -> float:
     return float(s.get("irr", float("-inf")))
 
 
-# NEW: keep allowed values in one place (engine-level guardrails)
+# Keep allowed values in one place (engine-level guardrails).
 _ALLOWED_SORT_KEYS = {
     "irr",
     "min_dscr",
@@ -92,7 +92,7 @@ _ALLOWED_SORT_KEYS = {
 
 def _estimate_grid_size(grid_axes: List[Tuple[str, List[Any]]]) -> int:
     """
-    NEW: Estimate total scenario grid size (Cartesian product).
+    Estimate total scenario grid size (Cartesian product).
 
     Used for hard guardrails so callers don't accidentally request massive work.
     """
@@ -132,7 +132,7 @@ def run_whatif_inst(
     - base_ml_features should include ONLY the fields the model expects.
     - base_inst_inputs should include the InstUnderwriteInputs fields.
 
-    NEW hardening:
+    Hardening behavior:
     - Reject invalid sort_by values.
     - Guard against exploding scenario grids.
     - Per-scenario error capture: one bad scenario should not crash the whole run.
@@ -178,7 +178,7 @@ def run_whatif_inst(
         ("rate_shock_bps", rate_shock_l),
     ]
 
-    # NEW: hard guardrail against huge Cartesian products
+    # Hard guardrail against huge Cartesian products.
     est = _estimate_grid_size(grid_axes)
     # Allow some overhead vs max_scenarios (because we cap generation anyway),
     # but still block pathological requests.
@@ -190,7 +190,7 @@ def run_whatif_inst(
 
     results: List[WhatIfInstScenarioResult] = []
 
-    # NEW: capture per-scenario exceptions; keep a short sample for diagnostics
+    # Capture per-scenario exceptions; keep a short sample for diagnostics.
     errors: List[Dict[str, Any]] = []
     error_sample_limit = 5
 
@@ -253,7 +253,7 @@ def run_whatif_inst(
             continue
 
     if not results:
-        # NEW: make failure actionable (caller sees why it failed)
+        # Make failure actionable so callers can debug inputs quickly.
         msg = "All institutional what-if scenarios failed."
         if errors:
             msg += f" Sample errors: {errors}"

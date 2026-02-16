@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 # Standard library
-from contextlib import asynccontextmanager  # NEW: lifespan hook replaces deprecated app.on_event
+from contextlib import asynccontextmanager  # lifespan hook replaces deprecated app.on_event
 from pathlib import Path
 import json
 import logging
@@ -13,7 +13,7 @@ import uuid
 # Third-party
 import joblib
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Request  # NEW: convert bad inputs into clear 4xx instead of silent 500s
+from fastapi import FastAPI, HTTPException, Request  # convert bad inputs into clear 4xx instead of silent 500s
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -255,7 +255,7 @@ def explainability():
 # Institutional what-if hardening helpers
 # =============================================================================
 
-# NEW: strict allow-list to prevent typos causing confusing results
+# Strict allow-list to prevent typos causing confusing results.
 WHATIF_INST_SORT_KEYS = {
     "irr",
     "min_dscr",
@@ -267,7 +267,7 @@ WHATIF_INST_SORT_KEYS = {
 
 def _normalize_year_keyed_dict(d: Optional[Dict[Any, Any]]) -> Optional[Dict[int, float]]:
     """
-    NEW: Normalize year-keyed dicts coming from JSON.
+    Normalize year-keyed dicts coming from JSON.
 
     JSON object keys are always strings, so payloads like:
       {"2": 250000}
@@ -290,7 +290,7 @@ def _normalize_year_keyed_dict(d: Optional[Dict[Any, Any]]) -> Optional[Dict[int
 
 def _reject_empty_list(name: str, v: Optional[List[Any]]) -> Optional[List[Any]]:
     """
-    NEW: Reject empty scenario vectors early.
+    Reject empty scenario vectors early.
 
     Why:
     - An empty list is almost always a caller bug.
@@ -766,7 +766,7 @@ def underwrite_inst_endpoint(req: UnderwriteInstRequest):
     replacement_capex_per_sqft = payload.pop("replacement_capex_per_sqft")
     value_add_capex = payload.pop("value_add_capex")
 
-    # NEW: normalize year-keyed capex dict (JSON keys come in as strings)
+    # Normalize year-keyed capex dict (JSON keys come in as strings).
     value_add_capex = _normalize_year_keyed_dict(value_add_capex)
 
     occupancy_shock_year = payload.pop("occupancy_shock_year")
@@ -897,7 +897,7 @@ def whatif_inst(req: WhatIfInstRequest):
     - The institutional underwriting is driven by provided line items and pro forma knobs.
     - The ML NOI prediction is returned only as an anchor/comparison.
 
-    NEW hardening:
+    Hardening behavior:
     - Validates sort_by to prevent typos.
     - Rejects empty scenario vectors (likely caller bugs).
     - Normalizes year-keyed capex dict so underwriting logic doesn't break.
@@ -1039,10 +1039,10 @@ def whatif_inst(req: WhatIfInstRequest):
     except HTTPException:
         raise
     except ValueError as e:
-        # NEW: treat known input problems as 422 (caller can fix payload)
+        # Treat known input problems as 422 so callers can fix payloads.
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        # NEW: keep the real error type in the response for faster diagnosis
+        # Include real error type in detail to speed diagnosis.
         raise HTTPException(
             status_code=500,
             detail=f"/whatif_inst failed: {type(e).__name__}: {e}",
