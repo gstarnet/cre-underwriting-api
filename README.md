@@ -52,6 +52,34 @@ BASE=http://127.0.0.1:8000 ./scripts/test_whatif_inst.sh
 pytest -q
 ```
 
+## Codex-friendly workflow
+
+Use stable command targets so local and automated workflows stay aligned:
+
+```zsh
+make setup
+make test
+make run
+make smoke
+make rebuild
+```
+
+Verification levels:
+
+- Fast verify: `make test`
+- Full verify:
+  1. Start API (`make run`)
+  2. Run smoke tests (`make smoke`)
+  3. If model/explainability logic changed, run:
+     - `python -m src.train`
+     - `python -m src.explain`
+
+Change protocol:
+
+- API contract changes: run `make test` and `make smoke`
+- Training/data/explainability changes: run `make test`, `python -m src.train`, and `python -m src.explain`
+- Keep generated artifacts (`models/`, `reports/`, `data/raw/`) out of source-control changes unless explicitly requested
+
 
 ## Docker
 
