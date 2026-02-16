@@ -19,6 +19,7 @@ from src.whatif import run_whatif
 from src.underwrite import UnderwriteInputs, underwrite
 from src.underwrite_inst import InstUnderwriteInputs, underwrite_institutional
 from src.whatif_inst import run_whatif_inst
+from src.unstructured import combine_unstructured_text, parse_document_paths
 
 # Path to the trained sklearn Pipeline saved by src.train
 MODEL_PATH = Path("models/model.joblib")
@@ -232,6 +233,41 @@ def _reject_empty_list(name: str, v: Optional[List[Any]]) -> Optional[List[Any]]
     return v
 
 
+def _prepare_unstructured_text(
+    payload: Dict[str, Any],
+    *,
+    strict: bool = True,
+) -> Dict[str, Any]:
+    """
+    Build/normalize `unstructured_text` from inline notes and optional documents.
+
+    Accepted payload keys:
+    - unstructured_text: pre-combined free-form text
+    - deal_notes: additional inline text
+    - document_paths: list[str] or delimited/json string of paths
+    """
+    merged = dict(payload)
+
+    base_text = merged.pop("unstructured_text", None)
+    deal_notes = merged.pop("deal_notes", None)
+    document_paths = parse_document_paths(merged.pop("document_paths", None))
+    inline_parts = [p for p in [base_text, deal_notes] if p]
+
+    try:
+        merged["unstructured_text"] = combine_unstructured_text(
+            inline_text="\n".join(str(p) for p in inline_parts) if inline_parts else "",
+            document_paths=document_paths,
+            strict=strict,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Failed to process unstructured content: {type(e).__name__}: {e}",
+        )
+
+    return merged
+
+
 # =============================================================================
 # 1) /predict — typed request schema that matches your CRE deal snapshot
 # =============================================================================
@@ -267,6 +303,11 @@ class PredictRequest(BaseModel):
     opex_t12: float
     gross_rent_t12: float
 
+    # Optional unstructured context (inline + document-based)
+    unstructured_text: Optional[str] = None
+    deal_notes: Optional[str] = None
+    document_paths: Optional[List[str]] = None
+
     # Financing terms
     ltv: float = Field(..., ge=0.0, le=1.0)
     interest_rate: float = Field(..., ge=0.0, le=1.0)
@@ -300,7 +341,7 @@ def predict(req: PredictRequest):
     """
     model = get_model()
 
-    payload = req.model_dump()
+    payload = _prepare_unstructured_text(req.model_dump())
     exit_cap_rate = payload.pop("exit_cap_rate")
     selling_cost_pct = payload.pop("selling_cost_pct")
 
@@ -337,6 +378,8 @@ class PredictFeaturesRequest(BaseModel):
     - quick experiments without changing the typed schema
     """
     features: Dict[str, Any]
+    document_paths: Optional[List[str]] = None
+    deal_notes: Optional[str] = None
     exit_cap_rate: float = Field(0.065, ge=0.0001, le=1.0)
     selling_cost_pct: float = Field(0.02, ge=0.0, le=0.2)
 
@@ -361,11 +404,18 @@ def predict_features(req: PredictFeaturesRequest):
     """
     model = get_model()
 
-    X = pd.DataFrame([req.features])
+    features = dict(req.features)
+    if req.deal_notes is not None:
+        features["deal_notes"] = req.deal_notes
+    if req.document_paths is not None:
+        features["document_paths"] = req.document_paths
+    features = _prepare_unstructured_text(features)
+
+    X = pd.DataFrame([features])
     pred_noi = float(model.predict(X)[0])
 
     roi = None
-    f = req.features
+    f = features
     required = ["purchase_price", "ltv", "interest_rate", "amort_years"]
     if all(k in f and f[k] is not None for k in required):
         roi_out = compute_roi(
@@ -438,7 +488,7 @@ def whatif(req: WhatIfRequest):
     """
     model = get_model()
 
-    payload = req.model_dump()
+    payload = _prepare_unstructured_text(req.model_dump())
 
     purchase_prices = payload.pop("purchase_prices", None)
     ltvs = payload.pop("ltvs", None)
@@ -513,7 +563,7 @@ def underwrite_endpoint(req: UnderwriteRequest):
     """
     model = get_model()
 
-    payload = req.model_dump()
+    payload = _prepare_unstructured_text(req.model_dump())
     exit_cap_rate = payload.pop("exit_cap_rate")
     selling_cost_pct = payload.pop("selling_cost_pct")
     hold_years = payload.pop("hold_years")
@@ -621,7 +671,7 @@ def underwrite_inst_endpoint(req: UnderwriteInstRequest):
     """
     model = get_model()
 
-    payload = req.model_dump()
+    payload = _prepare_unstructured_text(req.model_dump())
 
     # ROI-only fields (not ML features)
     exit_cap_rate = payload.pop("exit_cap_rate")
@@ -795,7 +845,7 @@ def whatif_inst(req: WhatIfInstRequest):
         )
 
     # Start from request data; then peel off vectors and build ML + underwriting payloads.
-    payload = req.model_dump()
+    payload = _prepare_unstructured_text(req.model_dump())
 
     # Scenario vectors
     purchase_prices = _reject_empty_list("purchase_prices", payload.pop("purchase_prices", None))

@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from sklearn.compose import ColumnTransformer
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.inspection import permutation_importance
@@ -33,9 +34,11 @@ from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 # Local
 from src.data_load import load_cre_csv, time_split, CRE_TARGET, TIME_COL
+from src.unstructured import UNSTRUCTURED_TEXT_COL, ensure_unstructured_text_column
 
 
 # -----------------------------------------------------------------------------
@@ -58,7 +61,7 @@ def _ensure_dirs() -> None:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _infer_feature_cols(df: pd.DataFrame) -> Tuple[List[str], List[str]]:
+def _infer_feature_cols(df: pd.DataFrame) -> Tuple[List[str], List[str], List[str]]:
     """
     Infer categorical vs numeric feature columns from the raw dataframe.
 
@@ -67,12 +70,30 @@ def _infer_feature_cols(df: pd.DataFrame) -> Tuple[List[str], List[str]]:
     - time column (TIME_COL)
     """
     feature_cols = [c for c in df.columns if c not in {CRE_TARGET, TIME_COL}]
-    cat_cols = [c for c in feature_cols if df[c].dtype == "object"]
-    num_cols = [c for c in feature_cols if c not in cat_cols]
-    return cat_cols, num_cols
+    text_cols = [c for c in feature_cols if c == UNSTRUCTURED_TEXT_COL]
+    non_text_cols = [c for c in feature_cols if c not in set(text_cols)]
+    cat_cols = [c for c in non_text_cols if df[c].dtype == "object"]
+    num_cols = [c for c in non_text_cols if c not in cat_cols]
+    return cat_cols, num_cols, text_cols
 
 
-def _build_preprocessor(cat_cols: List[str], num_cols: List[str]) -> ColumnTransformer:
+class _TextCleaner(BaseEstimator, TransformerMixin):
+    """Normalize optional text column into a 1D string array for TF-IDF."""
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        if isinstance(X, pd.DataFrame):
+            s = X.iloc[:, 0]
+        elif isinstance(X, pd.Series):
+            s = X
+        else:
+            s = pd.Series(X)
+        return s.fillna("").astype(str).map(lambda v: " ".join(v.split())).values
+
+
+def _build_preprocessor(cat_cols: List[str], num_cols: List[str], text_cols: List[str]) -> ColumnTransformer:
     """
     Preprocessor:
     - categorical: impute missing, one-hot encode (handle_unknown to avoid crashes)
@@ -95,13 +116,20 @@ def _build_preprocessor(cat_cols: List[str], num_cols: List[str]) -> ColumnTrans
         ]
     )
 
-    return ColumnTransformer(
-        transformers=[
-            ("cat", cat_pipe, cat_cols),
-            ("num", num_pipe, num_cols),
-        ],
-        remainder="drop",
-    )
+    transformers = [
+        ("cat", cat_pipe, cat_cols),
+        ("num", num_pipe, num_cols),
+    ]
+    if text_cols:
+        text_pipe = Pipeline(
+            steps=[
+                ("clean", _TextCleaner()),
+                ("tfidf", TfidfVectorizer(max_features=4000, ngram_range=(1, 2), min_df=2)),
+            ]
+        )
+        transformers.append(("text", text_pipe, text_cols))
+
+    return ColumnTransformer(transformers=transformers, remainder="drop")
 
 
 def _to_dense_if_needed(X):
@@ -221,13 +249,17 @@ def main() -> None:
     _ensure_dirs()
 
     df = load_cre_csv()
+    df = ensure_unstructured_text_column(df, strict=False)
+    for c in ("deal_notes", "document_paths"):
+        if c in df.columns and c != UNSTRUCTURED_TEXT_COL:
+            df = df.drop(columns=[c])
     ds = time_split(df)
 
     print(f"Target: {CRE_TARGET}")
 
-    cat_cols, num_cols = _infer_feature_cols(df)
+    cat_cols, num_cols, text_cols = _infer_feature_cols(df)
 
-    pre = _build_preprocessor(cat_cols, num_cols)
+    pre = _build_preprocessor(cat_cols, num_cols, text_cols)
 
     # Candidate models:
     # - ridge: stable baseline, handles sparse well
