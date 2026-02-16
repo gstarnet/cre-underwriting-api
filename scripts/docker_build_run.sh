@@ -42,8 +42,8 @@ RUN=0
 STOP=0
 IMAGE="cre-underwriting-api"
 PORT=""
-PORT_MOUNT="8000"
-PORT_WITH="8001"
+PORT_MOUNT="8001"
+PORT_WITH="8000"
 DO_HEALTH=1
 
 _usage() {

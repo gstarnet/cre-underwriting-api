@@ -18,6 +18,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
+if [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
+  PYTHON="${PYTHON:-$ROOT_DIR/.venv/bin/python}"
+else
+  PYTHON="${PYTHON:-python3}"
+fi
 
 echo "== clean: generated artifacts =="
 
@@ -34,15 +39,15 @@ rm -f reports/feature_importance.json || true
 mkdir -p data/raw models reports
 
 echo "== build: synthetic dataset =="
-python -m src.synth_data
+"$PYTHON" -m src.synth_data
 
 echo "== build: train model =="
-python -m src.train
+"$PYTHON" -m src.train
 
 echo "== build: time-series validation =="
-python -m src.validate_ts
+"$PYTHON" -m src.validate_ts
 
 echo "== build: explainability artifacts =="
-python -m src.explain
+"$PYTHON" -m src.explain
 
 echo "OK: rebuild completed"

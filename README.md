@@ -2,6 +2,8 @@
 
 Local, production-oriented framework for experimenting with CRE (commercial real estate) NOI forecasting and underwriting workflows:
 - Train a baseline ML model (tabular) to forecast next-12-month NOI.
+- Optionally enrich model features with unstructured inputs via TF-IDF
+  (`unstructured_text`, `deal_notes`, and document extraction from files).
 - Run underwriting / ROI calculations (simple + “institutional-style” v2).
 - Run what-if scenario grids (simple + institutional) with guardrails.
 - Serve everything via FastAPI for local testing and containerized runs.
@@ -51,6 +53,19 @@ BASE=http://127.0.0.1:8000 ./scripts/test_whatif_inst.sh
 ./scripts/test_explainability.sh
 pytest -q
 ```
+
+### Unstructured document support (optional)
+
+The API can accept:
+- inline text: `unstructured_text`, `deal_notes`
+- document paths: `document_paths` (list of files)
+
+Supported file types:
+- text: `.txt`, `.md`, `.csv`, `.json`, `.log`
+- documents: `.pdf`, `.docx`
+- images (OCR): `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.webp`
+
+For image OCR, install the Tesseract system binary in addition to Python deps.
 
 ## Codex-friendly workflow
 
@@ -280,4 +295,4 @@ pytest -q
 
 
 ## License
-Internal/proprietary (Cloud Breeze). See `LICENSE`.
+MIT License. See `LICENSE`.
