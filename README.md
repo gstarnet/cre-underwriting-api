@@ -1,5 +1,81 @@
 # CRE Underwriting API
 
+## Architecture at a glance
+
+This project is built as a production-oriented **decision-support service** for CRE underwriting, using a supervised learning + deterministic finance-engine architecture.
+
+### Core technologies and framework
+- **Python + FastAPI**: low-latency API serving, typed contracts, and operational simplicity.
+- **Pydantic models**: strict request/response validation and backward-compatible API evolution.
+- **pandas + scikit-learn**: tabular ML pipelines with time-aware data handling and explainability support.
+- **joblib model artifacts**: reproducible model serialization for local and container runs.
+- **Deterministic underwriting engines** (`underwrite`, `underwrite_inst`, `whatif`, `whatif_inst`):
+  transparent, auditable financial mechanics layered on top of ML predictions.
+- **Explainability + traceability artifacts**: permutation importance, optional Ridge coefficients,
+  dataset hash, model version, and training timestamp.
+- **MCP service layer** (`src/mcp_service.py`): tool-based integration surface for agents and institutional workflows.
+- **Docker + CI + pytest/smoke scripts**: reproducible build/test/deploy pipeline with API and container health checks.
+
+### Why this implementation is better than a traditional RL approach (for this use case)
+- **Problem fit**: current task is primarily forecast + underwriting analysis from historical snapshots,
+  not sequential online control where RL is strongest.
+- **Data efficiency**: supervised models train effectively on available labeled deal data; RL usually needs far
+  more interaction data or high-fidelity simulators.
+- **Auditability and governance**: deterministic finance outputs + feature-based explainability are easier to
+  review in institutional credit processes than policy-learning behaviors.
+- **Stability and reproducibility**: supervised pipelines with fixed splits/metrics are generally more stable across
+  retrains; RL training can be more sensitive to reward shaping and environment assumptions.
+- **Operational risk control**: guardrails, schema validation, and explicit constraints are straightforward in this architecture.
+- **Time-to-value**: this design ships faster and is easier to maintain for underwriting teams while still supporting
+  future extension into RL if a robust sequential decision environment is later introduced.
+
+### RL vs traditional ML (business-friendly view)
+- **Traditional ML (what this project uses today)**:
+  The model learns from past deals to make a forecast, similar to how an analyst uses historical comps and trends.
+  In this project, ML predicts next-12-month NOI, and then deterministic underwriting rules convert that into returns,
+  DSCR, debt yield, and what-if scenarios.
+- **Reinforcement Learning (RL)**:
+  RL is more like training an automated “decision agent” that learns by trial and error over many rounds, based on rewards/penalties.
+  This is useful when a system must continuously choose actions in sequence (for example, dynamic bidding or robot control).
+- **Why supervised ML is the better business fit here**:
+  - easier to explain to credit committees and investment teams
+  - easier to audit and validate for model risk/governance
+  - faster to deploy with lower operational uncertainty
+  - more stable when you have historical deal data but not a realistic simulation environment
+
+### Business value and practical use cases
+
+#### Where this tool helps most
+- **Deal screening at scale**:
+  Evaluate many opportunities quickly and focus analyst time on the most promising deals.
+- **Faster underwriting cycles**:
+  Reduce spreadsheet iteration by combining NOI prediction with deterministic underwriting outputs.
+- **Scenario planning for investment committees**:
+  Use what-if and institutional what-if tools to compare outcomes across cap rates, leverage, rate shocks, occupancy shocks, and capex choices.
+- **Portfolio consistency**:
+  Apply the same underwriting logic across teams, markets, and deal types to reduce process variance.
+- **Explainability for stakeholder trust**:
+  Support decisions with feature importance and traceability metadata (model version, training timestamp, dataset hash).
+
+#### Benefits of proper usage
+- **Time savings**:
+  Accelerates early and mid-stage analysis so teams can review more opportunities without increasing headcount.
+- **Higher decision consistency**:
+  Standardized logic reduces analyst-to-analyst drift and helps maintain policy discipline.
+- **Better risk visibility**:
+  Guardrails and stress scenarios make downside exposure clearer before capital is committed.
+- **Improved governance**:
+  Structured outputs and traceability make internal reviews and audit workflows more efficient.
+
+#### Recommended operating model (business-friendly)
+- Treat outputs as **decision support**, not autonomous approvals.
+- Use the tool for **first-pass ranking and scenario analysis**; keep final approval with investment/credit committees.
+- Review model performance periodically and retrain with updated market/deal data.
+- Combine model outputs with local market expertise, borrower quality assessment, and legal/asset-level diligence.
+
+### Architecture diagram
+![Architecture Diagram](docs/assets/architecture.png)
+
 Local, production-oriented framework for experimenting with CRE (commercial real estate) NOI forecasting and underwriting workflows:
 - Train a baseline ML model (tabular) to forecast next-12-month NOI.
 - Optionally enrich model features with unstructured inputs via TF-IDF
@@ -9,7 +85,7 @@ Local, production-oriented framework for experimenting with CRE (commercial real
 - Serve everything via FastAPI for local testing and containerized runs.
 - Generate explainability artifacts for API consumption (permutation importance + optional Ridge coefficients + traceability metadata).
 
-> Status: working end-to-end locally (train → explain → serve → smoke tests) and in Docker (mount-model + with-model targets).
+> Status: working end-to-end locally (train → validate → explain → serve/API+MCP → smoke tests) and in Docker (mount-model + with-model targets).
 
 
 ## Quick start (local)
@@ -80,9 +156,15 @@ Use stable command targets so local and automated workflows stay aligned:
 make setup
 make test
 make run
+make mcp-run
 make smoke
 make rebuild
 make validate-ts
+```
+
+If your shell `python3` is not your project venv interpreter, run with:
+```zsh
+PYTHON=./.venv/bin/python make test
 ```
 
 Verification levels:
@@ -152,6 +234,131 @@ Base URL: `http://127.0.0.1:8000`
 - `GET  /explainability` — exposes `reports/feature_importance.json` (permutation importance + traceability)
 
 Smoke tests cover the full surface area.
+
+
+## MCP service
+
+This repository includes an MCP server over **stdio** (no HTTP port required for MCP clients).
+
+### Run the MCP server
+
+```zsh
+make mcp-run
+# or
+python -m src.mcp_service
+```
+
+### Prerequisites before connecting clients
+- Ensure model/artifacts exist (or run rebuild first):
+  - `make rebuild`
+- If using custom paths/config, set env vars before launch:
+  - `MODEL_PATH`, `EXPLAINABILITY_JSON_PATH`, `DATA_PATH`, etc. (see Runtime config section).
+
+### How clients connect
+- Transport: `stdio`
+- Protocol: JSON-RPC 2.0 message framing with `Content-Length` headers
+- Supported MCP methods:
+  - `initialize`
+  - `ping`
+  - `tools/list`
+  - `tools/call`
+
+### Example MCP client command configuration
+
+Use this pattern in MCP-capable clients that accept command-based stdio servers:
+
+```json
+{
+  "command": "python",
+  "args": ["-m", "src.mcp_service"],
+  "cwd": "/absolute/path/to/cre-underwriting-api",
+  "env": {
+    "MODEL_PATH": "models/model.joblib",
+    "EXPLAINABILITY_JSON_PATH": "reports/feature_importance.json"
+  }
+}
+```
+
+If you use a local venv interpreter, prefer:
+
+```json
+{
+  "command": "/absolute/path/to/cre-underwriting-api/.venv/bin/python",
+  "args": ["-m", "src.mcp_service"],
+  "cwd": "/absolute/path/to/cre-underwriting-api"
+}
+```
+
+### Tool surface (including institutional)
+
+Supported MCP tools:
+- `health`
+- `explainability`
+- `predict`
+- `predict_features`
+- `whatif`
+- `underwrite`
+- `underwrite_inst`
+- `whatif_inst`
+
+Institutional methods are first-class MCP tools (`underwrite_inst`, `whatif_inst`) and use the same validation/guardrails as the API layer.
+
+### Protocol examples
+
+`initialize` request:
+
+```zsh
+Content-Length: <N>
+
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
+```
+
+`tools/list` request:
+
+```zsh
+Content-Length: <N>
+
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+```
+
+`tools/call` request (institutional example):
+
+```zsh
+Content-Length: <N>
+
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"whatif_inst","arguments":{"deal_id":"DTEST","asof_date":"2024-06-01","property_type":"Industrial","city":"Tampa","state":"FL","zip":"33602","year_built":2008,"gross_leasable_sqft":125000,"units":null,"purchase_price":25000000,"noi_t12":1500000,"occupancy_t12":0.95,"opex_t12":450000,"gross_rent_t12":2200000,"ltv":0.65,"interest_rate":0.062,"amort_years":25,"exit_cap_rate":0.065,"selling_cost_pct":0.02,"hold_years":5,"interest_only_years":1,"rent_growth":0.03,"opex_inflation":0.03,"occupancy_target":0.97,"occupancy_reversion_years":2,"taxes_year1":350000,"insurance_year1":60000,"reassess_taxes":true,"reassessed_tax_rate":0.02,"reassess_year":1,"capex_reserve_per_sqft":0.25,"replacement_capex_per_sqft":0.15,"value_add_capex":{"2":250000},"occupancy_shock_year":2,"occupancy_shock_drop":0.1,"occupancy_recovery_years":2,"rate_shock_year":3,"rate_shock_bps":150,"refi_year":3,"refi_ltv":0.65,"refi_rate":0.06,"refi_amort_years":25,"refi_cost_pct":0.01,"purchase_prices":[24000000,25000000],"exit_cap_rates":[0.0625,0.0675],"max_scenarios":20,"top_n":5,"sort_by":"irr"}}}
+```
+
+Successful `tools/call` responses include:
+- `content` (text payload)
+- `structuredContent` (machine-usable JSON result)
+- `isError` (`false` on success)
+
+Invalid inputs return JSON-RPC errors or MCP tool error payloads with details.
+
+Security note:
+- MCP stdio calls invoke service logic directly and do not traverse HTTP middleware.
+- `AUTH_MODE`/`AUTH_TOKEN` protect FastAPI HTTP endpoints, but not local stdio MCP transport.
+- Use OS/process-level controls for local MCP access (user permissions, container isolation, CI secret handling).
+
+### Quick MCP connectivity test client
+
+For a simple local validation of MCP wiring, run:
+
+```zsh
+python scripts/mcp_test_client.py
+```
+
+Using the project venv explicitly:
+
+```zsh
+./.venv/bin/python scripts/mcp_test_client.py --python ./.venv/bin/python
+```
+
+The script verifies:
+- `initialize`
+- `tools/list`
+- `tools/call` with `health`
 
 
 ## Generated artifacts (ignored by git)
@@ -237,7 +444,7 @@ Verifies:
 - `src.explain` runs
 - CSV/JSON output schema
 - `/explainability` endpoint schema (if present)
-- traceability fields (`model_version`, `trained_at_utc`, `dataset_hash`) are present in explainability JSON
+- explainability JSON artifact includes traceability fields (`model_version`, `trained_at_utc`, `dataset_hash`)
 
 ```zsh
 ./scripts/test_explainability.sh
@@ -306,6 +513,7 @@ CI also runs:
 - `src/`
   - `__main__.py` — `python -m src` entrypoint (Uvicorn)
   - `api.py` — FastAPI app + endpoints
+  - `mcp_service.py` — MCP server (JSON-RPC over stdio) exposing baseline + institutional tools
   - `data_load.py` — load + time-based split utilities
   - `synth_data.py` — synthetic CRE dataset generator (`data/raw/cre_deals.csv`)
   - `train.py` — training pipeline (produces `models/model.joblib` + metrics)
@@ -325,6 +533,7 @@ CI also runs:
   - `smoke_api.sh`
   - `test_whatif_inst.sh`
   - `test_explainability.sh`
+  - `mcp_test_client.py`
   - `rebuild_env.sh`
   - `rebuild_all.sh`
   - `docker_build_run.sh`
@@ -332,6 +541,7 @@ CI also runs:
   - `test_whatif_exit_cap_default.py`
   - `test_unstructured.py`
   - `test_api_basic.py`
+  - `test_mcp_service.py`
 - `models/` (generated)
 - `reports/` (generated)
 - `data/raw/` (generated)

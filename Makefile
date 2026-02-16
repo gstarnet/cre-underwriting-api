@@ -1,4 +1,4 @@
-.PHONY: setup run test smoke rebuild train explain validate-ts sanity
+.PHONY: setup run mcp-run test smoke rebuild train explain validate-ts sanity
 
 PYTHON ?= python3
 SMOKE_SCRIPTS ?= ./scripts/smoke_api.sh ./scripts/test_explainability.sh ./scripts/test_whatif_inst.sh
@@ -8,6 +8,9 @@ setup:
 
 run:
 	$(PYTHON) -m src
+
+mcp-run:
+	$(PYTHON) -m src.mcp_service
 
 test:
 	$(PYTHON) -m pytest -q

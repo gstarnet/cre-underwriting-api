@@ -1,5 +1,29 @@
 # Release Notes
 
+## v0.3.1 - 2026-02-16
+
+### Summary
+Adds a full MCP server layer over stdio with first-class institutional tools.
+
+### Changes (since `v0.3.0`)
+- Added `src/mcp_service.py` implementing MCP JSON-RPC over stdio:
+  - `initialize`
+  - `ping`
+  - `tools/list`
+  - `tools/call`
+- Exposed full tool surface via MCP:
+  - `health`
+  - `explainability`
+  - `predict`
+  - `predict_features`
+  - `whatif`
+  - `underwrite`
+  - `underwrite_inst`
+  - `whatif_inst`
+- Added `make mcp-run` target in `Makefile`.
+- Added MCP protocol and routing tests in `tests/test_mcp_service.py`, including institutional tool coverage.
+- Updated `README.md` with MCP run instructions and supported tool list.
+
 ## v0.3.0 - 2026-02-16
 
 ### Summary
