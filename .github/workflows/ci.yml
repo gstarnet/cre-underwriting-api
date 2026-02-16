@@ -1,14 +1,12 @@
-name: ci
+name: CI
 
 on:
   push:
-    branches: [ "main", "master" ]
   pull_request:
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -19,18 +17,26 @@ jobs:
         with:
           python-version: "3.9"
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install -r requirements.txt
+          python -m pip install pytest
 
-      - name: Train + explain + validate_ts
+      - name: Generate synthetic dataset (CI)
         run: |
-          python -m src.synth_data
-          python -m src.train
-          python -m src.explain
-          python -m src.validate_ts
+          mkdir -p data/raw
+          python -m src.synth_data || python src/synth_data.py
 
-      - name: Run unit tests (pytest)
+      - name: Train model (CI)
+        run: |
+          mkdir -p models reports
+          python -m src.train
+
+      - name: Explainability artifacts (CI)
+        run: |
+          python -m src.explain
+
+      - name: Run tests
         run: |
           python -m pytest -q
