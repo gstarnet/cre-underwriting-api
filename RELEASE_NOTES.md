@@ -1,5 +1,48 @@
 # Release Notes
 
+## v0.3.0 - 2026-02-16
+
+### Summary
+Adds operational hardening and traceability across runtime config, logging/auth, dataset/model metadata, backtesting artifacts, explainability output, and CI verification.
+
+### Changes (since `v0.2.0`)
+- Added centralized environment-driven runtime settings in `src/config.py`:
+  - network: `HOST`, `PORT`
+  - logging: `LOG_LEVEL`, `LOG_JSON`
+  - paths: `DATA_PATH`, `DATASET_METADATA_PATH`, `MODEL_PATH`, `MODEL_SNAPSHOT_PATH`, `REPORTS_DIR`, `EXPLAINABILITY_JSON_PATH`
+  - validation: `TS_CV_SPLITS`
+  - auth: `AUTH_MODE`, `AUTH_TOKEN`
+- Added structured logging utilities in `src/logging_utils.py` and wired startup logging in `src/__main__.py`.
+- Added HTTP middleware in `src/api.py` for:
+  - response `X-Request-ID`
+  - structured request completion logs
+  - optional token auth mode (`AUTH_MODE=token`, excludes `/health`)
+- Added dataset versioning helpers in `src/dataset_versioning.py`:
+  - SHA-256 dataset checksum
+  - metadata artifact at `data/metadata/dataset_metadata.json`
+- Updated training flow in `src/train.py`:
+  - writes dataset metadata during training
+  - writes model snapshot metadata (`reports/model_snapshot.json`) with model version/time/hash and holdout metrics
+- Expanded explainability output in `src/explain.py`:
+  - includes traceability fields (`model_version`, `trained_at_utc`, `dataset_hash`)
+  - includes `ridge_coefficients` when the selected model is Ridge
+- Improved explainability API compatibility in `src/api.py`:
+  - `/explainability` now ensures traceability keys are present in response payload
+- Strengthened backtesting in `src/validate_ts.py`:
+  - configurable fold count via `TS_CV_SPLITS` (default 8)
+  - persisted fold-level artifact `reports/ts_cv_folds.json` with per-fold metrics/windows/model params/hash
+- Added `make validate-ts` target in `Makefile`.
+- Updated `scripts/rebuild_all.sh` cleanup/build flow for new metadata outputs.
+- Added minimal API behavior coverage in `tests/test_api_basic.py`.
+- Hardened CI workflow in `.github/workflows/ci.yml`:
+  - dataset fallback generation only when dataset is missing
+  - Docker smoke step (build image + run container + `curl /health`)
+- Updated docs (`README.md`, `.env.example`) and ignore rules (`.gitignore`) for new runtime and artifact behavior.
+
+### Notes
+- Real CRE data replacement is not bundled in this release; synthetic dataset generation remains as fallback in local/CI workflows.
+- `make test` depends on the `PYTHON` setting/environment; in non-venv shells use `PYTHON=./.venv/bin/python make test` if needed.
+
 ## v0.2.0 - 2026-02-16
 
 ### Summary

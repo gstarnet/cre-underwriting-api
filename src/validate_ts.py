@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime, timezone
+import json
+from typing import Any, Dict, List, Tuple
 import numpy as np
 import pandas as pd
 
@@ -13,9 +16,12 @@ from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.ensemble import HistGradientBoostingRegressor
 
+from src.config import get_settings
 from src.data_load import load_cre_csv, time_split, TIME_COL
+from src.dataset_versioning import write_dataset_metadata
 
-REPORTS_DIR = Path("reports")
+settings = get_settings()
+REPORTS_DIR = settings.reports_dir
 REPORTS_DIR.mkdir(exist_ok=True, parents=True)
 
 
@@ -65,8 +71,8 @@ def eval_regression(y_true, y_pred) -> dict:
 def walk_forward_cv(
         X: pd.DataFrame,
         y: pd.Series,
-        n_splits: int = 5,
-) -> pd.DataFrame:
+        n_splits: int = 8,
+) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
     n = len(X)
     n_splits = max(2, min(n_splits, n - 1))
     tscv = TimeSeriesSplit(n_splits=n_splits)
@@ -76,6 +82,7 @@ def walk_forward_cv(
     pipe = Pipeline(steps=[("pre", pre), ("model", model)])
 
     rows = []
+    fold_artifacts: List[Dict[str, Any]] = []
     split_idx = 0
 
     for train_idx, val_idx in tscv.split(X):
@@ -104,19 +111,34 @@ def walk_forward_cv(
                 "r2": m["r2"],
             }
         )
+        fold_artifacts.append(
+            {
+                "split": split_idx,
+                "train_n": len(train_idx),
+                "val_n": len(val_idx),
+                "train_start": str(X_tr[TIME_COL].min()) if TIME_COL in X_tr else None,
+                "train_end": str(X_tr[TIME_COL].max()) if TIME_COL in X_tr else None,
+                "val_start": str(X_va[TIME_COL].min()) if TIME_COL in X_va else None,
+                "val_end": str(X_va[TIME_COL].max()) if TIME_COL in X_va else None,
+                "metrics": m,
+            }
+        )
 
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows), fold_artifacts
 
 
 def main():
-    df = load_cre_csv("data/raw/cre_deals.csv")
+    df = load_cre_csv(str(settings.data_path))
+    dataset_meta = write_dataset_metadata(df, data_path=settings.data_path)
     ds = time_split(df, test_frac=0.2)
 
     # CV runs on TRAIN ONLY, ordered by time
     X_train = ds.X_train.sort_values(TIME_COL).reset_index(drop=True)
     y_train = ds.y_train.reset_index(drop=True)
 
-    cv_metrics = walk_forward_cv(X_train, y_train, n_splits=5)
+    cv_metrics, fold_artifacts = walk_forward_cv(
+        X_train, y_train, n_splits=settings.ts_cv_splits
+    )
 
     summary = (
         cv_metrics.groupby("model")[["mae", "rmse"]]
@@ -127,11 +149,22 @@ def main():
 
     cv_path = REPORTS_DIR / "ts_cv_metrics.csv"
     summary_path = REPORTS_DIR / "ts_cv_summary.csv"
+    folds_path = REPORTS_DIR / "ts_cv_folds.json"
     cv_metrics.to_csv(cv_path, index=False)
     summary.to_csv(summary_path, index=False)
+    fold_payload = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "n_splits": int(settings.ts_cv_splits),
+        "model": "hgb",
+        "model_params": HistGradientBoostingRegressor(random_state=42).get_params(),
+        "dataset_hash": dataset_meta.get("dataset_hash"),
+        "folds": fold_artifacts,
+    }
+    folds_path.write_text(json.dumps(fold_payload, indent=2), encoding="utf-8")
 
     print("Saved:", cv_path)
     print("Saved:", summary_path)
+    print("Saved:", folds_path)
     print(summary.to_string(index=False))
 
 

@@ -14,27 +14,68 @@ Notes:
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Dict, List
+import json
 
 import joblib
-import numpy as np
 import pandas as pd
+from sklearn.linear_model import Ridge
 from sklearn.inspection import permutation_importance
 
+from src.config import get_settings
 from src.data_load import load_cre_csv, time_split, CRE_TARGET, TIME_COL
+from src.dataset_versioning import write_dataset_metadata
 
-MODEL_PATH = Path("models/model.joblib")
-REPORTS_DIR = Path("reports")
+settings = get_settings()
+MODEL_PATH = settings.model_path
+REPORTS_DIR = settings.reports_dir
 FEATURE_IMPORTANCE_CSV = REPORTS_DIR / "feature_importance.csv"
-FEATURE_IMPORTANCE_JSON = REPORTS_DIR / "feature_importance.json"
+FEATURE_IMPORTANCE_JSON = settings.explainability_json_path
 
 
 def _ensure_dirs() -> None:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _save_feature_importance(fi: pd.DataFrame) -> None:
+def _load_model_snapshot() -> Dict[str, Any]:
+    if not settings.model_snapshot_path.exists():
+        return {}
+    try:
+        return json.loads(settings.model_snapshot_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _extract_ridge_coefficients(model: Any) -> List[Dict[str, float]]:
+    if not hasattr(model, "named_steps"):
+        return []
+    fitted_model = model.named_steps.get("model")
+    pre = model.named_steps.get("pre")
+    if not isinstance(fitted_model, Ridge) or pre is None:
+        return []
+    if not hasattr(fitted_model, "coef_") or not hasattr(pre, "get_feature_names_out"):
+        return []
+
+    feature_names = list(pre.get_feature_names_out())
+    coeffs = fitted_model.coef_
+    if len(feature_names) != len(coeffs):
+        return []
+
+    pairs = [
+        {"feature": str(feature_names[i]), "coefficient": float(coeffs[i])}
+        for i in range(len(feature_names))
+    ]
+    pairs.sort(key=lambda x: abs(x["coefficient"]), reverse=True)
+    return pairs[:50]
+
+
+def _save_feature_importance(
+    fi: pd.DataFrame,
+    *,
+    model_snapshot: Dict[str, Any],
+    ridge_coefficients: List[Dict[str, float]],
+    dataset_hash: str,
+) -> None:
     """
     Save explainability artifacts to:
       - reports/feature_importance.csv
@@ -42,8 +83,6 @@ def _save_feature_importance(fi: pd.DataFrame) -> None:
     """
     fi.to_csv(FEATURE_IMPORTANCE_CSV, index=False)
 
-    # JSON payload is intentionally simple and stable for API consumption.
-    # Keep the keys aligned with scripts/test_explainability.sh expectations.
     rows = [
         {
             "feature": r["feature"],
@@ -54,19 +93,19 @@ def _save_feature_importance(fi: pd.DataFrame) -> None:
     ]
 
     payload = {
-        # Required by test + useful for consumers
         "target": CRE_TARGET,
         "method": "permutation_importance",
         "scoring": "neg_mean_absolute_error",
         "n_repeats": 10,
         "rows_test": int(len(fi)),
         "feature_importance": rows,
-        # Backward-compat alias (older scripts may look for "rows")
         "rows": rows,
+        "dataset_hash": dataset_hash or model_snapshot.get("dataset_hash"),
+        "model_version": model_snapshot.get("model_version"),
+        "trained_at_utc": model_snapshot.get("trained_at_utc"),
     }
-
-    # Write JSON deterministically
-    import json
+    if ridge_coefficients:
+        payload["ridge_coefficients"] = ridge_coefficients
 
     FEATURE_IMPORTANCE_JSON.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -81,6 +120,8 @@ def main() -> None:
 
     # Load data and reuse the same leakage-safe time split as training
     df = load_cre_csv()
+    dataset_meta = write_dataset_metadata(df, data_path=settings.data_path)
+    model_snapshot = _load_model_snapshot()
     ds = time_split(df)
 
     # Ensure X_test is a DataFrame with columns, so feature names match permutation output length
@@ -122,7 +163,13 @@ def main() -> None:
         }
     ).sort_values("importance_mean", ascending=False)
 
-    _save_feature_importance(fi)
+    ridge_coefficients = _extract_ridge_coefficients(model)
+    _save_feature_importance(
+        fi,
+        model_snapshot=model_snapshot,
+        ridge_coefficients=ridge_coefficients,
+        dataset_hash=str(dataset_meta.get("dataset_hash", "")),
+    )
 
     print(f"Saved: {FEATURE_IMPORTANCE_CSV}")
     print(f"Saved: {FEATURE_IMPORTANCE_JSON}")

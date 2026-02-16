@@ -17,7 +17,9 @@ from __future__ import annotations
 
 # Standard library
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
+import json
 from typing import Dict, Any, List, Tuple
 
 # Third-party
@@ -37,17 +39,21 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 # Local
+from src.config import get_settings
 from src.data_load import load_cre_csv, time_split, CRE_TARGET, TIME_COL
+from src.dataset_versioning import write_dataset_metadata
 from src.unstructured import UNSTRUCTURED_TEXT_COL, ensure_unstructured_text_column
 
 
 # -----------------------------------------------------------------------------
 # Paths
 # -----------------------------------------------------------------------------
-MODELS_DIR = Path("models")
-REPORTS_DIR = Path("reports")
+settings = get_settings()
+MODELS_DIR = settings.model_path.parent
+REPORTS_DIR = settings.reports_dir
 
-MODEL_PATH = MODELS_DIR / "model.joblib"
+MODEL_PATH = settings.model_path
+MODEL_SNAPSHOT_JSON = settings.model_snapshot_path
 METRICS_CSV = REPORTS_DIR / "metrics.csv"
 FEATURE_IMPORTANCE_CSV = REPORTS_DIR / "feature_importance.csv"
 FEATURE_IMPORTANCE_JSON = REPORTS_DIR / "feature_importance.json"
@@ -176,6 +182,24 @@ def _save_metrics(rows: List[Dict[str, Any]]) -> None:
     df.to_csv(METRICS_CSV, index=False)
 
 
+def _save_model_snapshot(
+    *,
+    best_name: str,
+    metrics_rows: List[Dict[str, Any]],
+    dataset_meta: Dict[str, Any],
+) -> None:
+    payload = {
+        "model_version": "v1",
+        "trained_at_utc": datetime.now(timezone.utc).isoformat(),
+        "model_path": str(MODEL_PATH),
+        "best_model_name": best_name,
+        "dataset_hash": dataset_meta.get("dataset_hash"),
+        "dataset_metadata_path": str(settings.dataset_metadata_path),
+        "holdout_metrics": metrics_rows,
+    }
+    MODEL_SNAPSHOT_JSON.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
 def _save_permutation_importance(model: Pipeline, X_test: pd.DataFrame, y_test: pd.Series) -> None:
     """
     Compute and store permutation importance.
@@ -249,6 +273,7 @@ def main() -> None:
     _ensure_dirs()
 
     df = load_cre_csv()
+    dataset_meta = write_dataset_metadata(df, data_path=settings.data_path)
     df = ensure_unstructured_text_column(df, strict=False)
     for c in ("deal_notes", "document_paths"):
         if c in df.columns and c != UNSTRUCTURED_TEXT_COL:
@@ -306,6 +331,11 @@ def main() -> None:
             best_pipe = pipe
 
     _save_metrics(metrics_rows)
+    _save_model_snapshot(
+        best_name=str(best_name),
+        metrics_rows=metrics_rows,
+        dataset_meta=dataset_meta,
+    )
     print(f"Saved metrics: {METRICS_CSV}")
 
     # Save best model
@@ -315,6 +345,7 @@ def main() -> None:
     # Explainability artifacts on the chosen best model (test fold)
     _save_permutation_importance(best_pipe, ds.X_test, ds.y_test)
     print(f"Saved feature importance: {FEATURE_IMPORTANCE_CSV} and {FEATURE_IMPORTANCE_JSON}")
+    print(f"Saved model snapshot: {MODEL_SNAPSHOT_JSON}")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 # Build artifacts / generated data
 data/raw/cre_deals.csv
+data/metadata/*.json
 models/*.joblib
 reports/*.csv
 reports/*.json

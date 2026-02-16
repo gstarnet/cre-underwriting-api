@@ -1,4 +1,4 @@
-.PHONY: setup run test smoke rebuild train explain sanity
+.PHONY: setup run test smoke rebuild train explain validate-ts sanity
 
 PYTHON ?= python3
 SMOKE_SCRIPTS ?= ./scripts/smoke_api.sh ./scripts/test_explainability.sh ./scripts/test_whatif_inst.sh
@@ -26,6 +26,9 @@ train:
 
 explain:
 	$(PYTHON) -m src.explain
+
+validate-ts:
+	$(PYTHON) -m src.validate_ts
 
 sanity:
 	$(PYTHON) -m src.sanity

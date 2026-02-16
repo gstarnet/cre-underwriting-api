@@ -23,10 +23,12 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pytest
 
-      - name: Generate synthetic dataset (CI)
+      - name: Ensure dataset available (CI fallback)
         run: |
-          mkdir -p data/raw
-          python -m src.synth_data || python src/synth_data.py
+          if [ ! -f "data/raw/cre_deals.csv" ]; then
+            mkdir -p data/raw
+            python -m src.synth_data || python src/synth_data.py
+          fi
 
       - name: Train model (CI)
         run: |
@@ -40,3 +42,17 @@ jobs:
       - name: Run tests
         run: |
           python -m pytest -q
+
+      - name: Docker smoke (build + run + health)
+        run: |
+          docker build --target with-model -t cre-underwriting-api:ci .
+          docker run -d --rm --name cre-underwriting-api-ci -p 18000:8000 cre-underwriting-api:ci
+          for i in {1..20}; do
+            if curl -fsS http://127.0.0.1:18000/health >/dev/null; then
+              echo "Docker health OK"
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18000/health
+          docker rm -f cre-underwriting-api-ci
