@@ -1,5 +1,13 @@
-.idea/
-.venv
-#models/*
-!models/model.joblib
+# Build artifacts / generated data
+data/raw/cre_deals.csv
+models/*.joblib
+reports/*.csv
+reports/*.json
 
+# Virtualenv / IDE / OS
+.venv/
+.idea/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store

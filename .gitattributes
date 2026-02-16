@@ -1,0 +1,12 @@
+# Normalize line endings
+* text=auto eol=lf
+
+# Treat scripts as text
+*.sh text eol=lf
+*.zsh text eol=lf
+
+# Python
+*.py text eol=lf
+
+# Prevent diffs for binaries (if any later)
+*.joblib binary
