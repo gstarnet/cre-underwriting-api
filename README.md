@@ -295,4 +295,4 @@ pytest -q
 
 
 ## License
-Internal/proprietary (Cloud Breeze). See `LICENSE`.
+MIT License. See `LICENSE`.

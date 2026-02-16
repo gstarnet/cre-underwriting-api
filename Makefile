@@ -1,6 +1,7 @@
 .PHONY: setup run test smoke rebuild train explain sanity
 
 PYTHON ?= python3
+SMOKE_SCRIPTS ?= ./scripts/smoke_api.sh ./scripts/test_explainability.sh ./scripts/test_whatif_inst.sh
 
 setup:
 	./scripts/rebuild_env.sh
@@ -12,7 +13,10 @@ test:
 	$(PYTHON) -m pytest -q
 
 smoke:
-	./scripts/smoke_api.sh
+	@for s in $(SMOKE_SCRIPTS); do \
+		echo "== smoke: $$s =="; \
+		$$s; \
+	done
 
 rebuild:
 	./scripts/rebuild_all.sh

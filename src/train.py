@@ -258,6 +258,10 @@ def main() -> None:
     print(f"Target: {CRE_TARGET}")
 
     cat_cols, num_cols, text_cols = _infer_feature_cols(df)
+    if text_cols:
+        text_series = df[text_cols[0]].fillna("").astype(str).map(lambda v: v.strip())
+        if not (text_series != "").any():
+            text_cols = []
 
     pre = _build_preprocessor(cat_cols, num_cols, text_cols)
 
