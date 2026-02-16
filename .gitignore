@@ -1,5 +1,5 @@
 .idea/
 .venv
-models/*
+#models/*
 !models/model.joblib
 
