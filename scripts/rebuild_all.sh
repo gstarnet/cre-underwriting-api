@@ -34,9 +34,11 @@ rm -f reports/ts_cv_metrics.csv || true
 rm -f reports/ts_cv_summary.csv || true
 rm -f reports/feature_importance.csv || true
 rm -f reports/feature_importance.json || true
+rm -f reports/model_snapshot.json || true
+rm -f data/metadata/dataset_metadata.json || true
 
 # Ensure directories exist (in case they were removed)
-mkdir -p data/raw models reports
+mkdir -p data/raw data/metadata models reports
 
 echo "== build: synthetic dataset =="
 "$PYTHON" -m src.synth_data

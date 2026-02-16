@@ -5,15 +5,20 @@ from __future__ import annotations
 from contextlib import asynccontextmanager  # NEW: lifespan hook replaces deprecated app.on_event
 from pathlib import Path
 import json
+import logging
+import time
 from typing import Any, Dict, List, Optional
+import uuid
 
 # Third-party
 import joblib
 import pandas as pd
-from fastapi import FastAPI, HTTPException  # NEW: convert bad inputs into clear 4xx instead of silent 500s
+from fastapi import FastAPI, HTTPException, Request  # NEW: convert bad inputs into clear 4xx instead of silent 500s
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 # Local modules
+from src.config import get_settings
 from src.roi import RoiInputs, compute_roi
 from src.whatif import run_whatif
 from src.underwrite import UnderwriteInputs, underwrite
@@ -21,8 +26,11 @@ from src.underwrite_inst import InstUnderwriteInputs, underwrite_institutional
 from src.whatif_inst import run_whatif_inst
 from src.unstructured import combine_unstructured_text, parse_document_paths
 
+settings = get_settings()
+logger = logging.getLogger("src.api")
+
 # Path to the trained sklearn Pipeline saved by src.train
-MODEL_PATH = Path("models/model.joblib")
+MODEL_PATH = settings.model_path
 
 # Cached model instance (loaded once per process)
 _model = None
@@ -59,6 +67,59 @@ app = FastAPI(
 )
 
 
+def _auth_failed_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "Unauthorized"},
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+@app.middleware("http")
+async def request_context_middleware(request: Request, call_next):
+    start = time.perf_counter()
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = request_id
+
+    if settings.auth_mode == "token" and request.url.path != "/health":
+        expected = settings.auth_token.strip()
+        auth_header = request.headers.get("Authorization", "")
+        token = auth_header.replace("Bearer ", "", 1).strip() if auth_header else ""
+        if not expected or token != expected:
+            duration_ms = round((time.perf_counter() - start) * 1000.0, 3)
+            logger.warning(
+                "request_rejected",
+                extra={
+                    "request_id": request_id,
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": 401,
+                    "duration_ms": duration_ms,
+                    "client_ip": request.client.host if request.client else None,
+                },
+            )
+            response = _auth_failed_response()
+            response.headers["X-Request-ID"] = request_id
+            return response
+
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+
+    duration_ms = round((time.perf_counter() - start) * 1000.0, 3)
+    logger.info(
+        "request_complete",
+        extra={
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "status_code": response.status_code,
+            "duration_ms": duration_ms,
+            "client_ip": request.client.host if request.client else None,
+        },
+    )
+    return response
+
+
 def get_model():
     """
     Lazy-load and cache the trained model pipeline.
@@ -85,7 +146,7 @@ def health():
     return {"status": "ok"}
 
 # Explainability artifacts (produced by: python -m src.explain)
-FEATURE_IMPORTANCE_JSON = Path("reports/feature_importance.json")
+FEATURE_IMPORTANCE_JSON = settings.explainability_json_path
 
 # =============================================================================
 # Explainability (Permutation Importance) — served from reports/feature_importance.json
@@ -178,7 +239,14 @@ def explainability():
             )
 
     # Ensure required top-level keys exist for tests/clients
-    for k in ("method", "n_repeats", "scoring"):
+    for k in (
+        "method",
+        "n_repeats",
+        "scoring",
+        "model_version",
+        "trained_at_utc",
+        "dataset_hash",
+    ):
         if k not in payload:
             payload[k] = None  # keep schema stable; file already has these in your case
 

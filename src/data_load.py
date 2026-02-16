@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import pandas as pd
 
+from src.config import get_settings
+
 CRE_TARGET = "noi_next12"
 TIME_COL = "asof_date"
 
@@ -16,8 +18,10 @@ class Dataset:
     y_test: pd.Series
 
 
-def load_cre_csv(path: str = "data/raw/cre_deals.csv") -> pd.DataFrame:
-    df = pd.read_csv(path)
+def load_cre_csv(path: str | None = None) -> pd.DataFrame:
+    settings = get_settings()
+    resolved_path = path or str(settings.data_path)
+    df = pd.read_csv(resolved_path)
 
     if TIME_COL not in df.columns:
         raise ValueError(f"Missing required column: {TIME_COL}")

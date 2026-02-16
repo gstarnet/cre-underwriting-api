@@ -7,7 +7,7 @@ Local, production-oriented framework for experimenting with CRE (commercial real
 - Run underwriting / ROI calculations (simple + “institutional-style” v2).
 - Run what-if scenario grids (simple + institutional) with guardrails.
 - Serve everything via FastAPI for local testing and containerized runs.
-- Generate explainability artifacts (permutation importance) for API consumption.
+- Generate explainability artifacts for API consumption (permutation importance + optional Ridge coefficients + traceability metadata).
 
 > Status: working end-to-end locally (train → explain → serve → smoke tests) and in Docker (mount-model + with-model targets).
 
@@ -82,6 +82,7 @@ make test
 make run
 make smoke
 make rebuild
+make validate-ts
 ```
 
 Verification levels:
@@ -90,7 +91,8 @@ Verification levels:
 - Full verify:
   1. Start API (`make run`)
   2. Run smoke tests (`make smoke`)
-  3. If model/explainability logic changed, run:
+  3. Run walk-forward time-series validation (`make validate-ts`)
+  4. If model/explainability logic changed, run:
      - `python -m src.train`
      - `python -m src.explain`
 
@@ -147,7 +149,7 @@ Base URL: `http://127.0.0.1:8000`
 - `POST /underwrite` — simple multi-year underwriting
 - `POST /underwrite_inst` — institutional underwriting (v2 knobs)
 - `POST /whatif_inst` — institutional what-if scenario grid with validation + guardrails
-- `GET  /explainability` — exposes `reports/feature_importance.json` (permutation importance)
+- `GET  /explainability` — exposes `reports/feature_importance.json` (permutation importance + traceability)
 
 Smoke tests cover the full surface area.
 
@@ -161,8 +163,11 @@ These outputs are generated locally and should be excluded from version control:
 - `reports/metrics.csv`
 - `reports/ts_cv_metrics.csv`
 - `reports/ts_cv_summary.csv`
+- `reports/ts_cv_folds.json`
 - `reports/feature_importance.csv`
 - `reports/feature_importance.json`
+- `reports/model_snapshot.json`
+- `data/metadata/dataset_metadata.json`
 
 To rebuild everything from scratch:
 ```zsh
@@ -180,7 +185,7 @@ Rebuilds the local Python environment (creates `.venv`, installs dependencies).
 ```
 
 ### `scripts/rebuild_all.sh`
-One-command rebuild of all generated artifacts (synthetic data, train, validation, explainability).
+One-command rebuild of all generated artifacts (synthetic data, train, validation, explainability, metadata).
 
 ```zsh
 ./scripts/rebuild_all.sh
@@ -232,11 +237,26 @@ Verifies:
 - `src.explain` runs
 - CSV/JSON output schema
 - `/explainability` endpoint schema (if present)
+- traceability fields (`model_version`, `trained_at_utc`, `dataset_hash`) are present in explainability JSON
 
 ```zsh
 ./scripts/test_explainability.sh
 ```
 
+
+## Runtime config + ops
+
+Environment-based runtime config:
+- network: `HOST`, `PORT`
+- logging: `LOG_LEVEL`, `LOG_JSON`
+- paths: `DATA_PATH`, `DATASET_METADATA_PATH`, `MODEL_PATH`, `MODEL_SNAPSHOT_PATH`, `REPORTS_DIR`, `EXPLAINABILITY_JSON_PATH`
+- validation: `TS_CV_SPLITS`
+- auth: `AUTH_MODE` (`none` or `token`), `AUTH_TOKEN`
+
+Behavior:
+- Structured JSON request logs are emitted by default.
+- Responses include `X-Request-ID`.
+- If `AUTH_MODE=token`, all non-`/health` endpoints require `Authorization: Bearer <AUTH_TOKEN>`.
 
 ## Sanity + package notes
 
@@ -267,10 +287,18 @@ Regression test: confirms `exit_cap_rate` default/behavior in what-if logic.
 ### `tests/test_unstructured.py`
 Regression tests for unstructured text ingestion helpers (`parse_document_paths`, file extraction, and DataFrame enrichment).
 
+### `tests/test_api_basic.py`
+Minimal API behavior tests (prediction happy path, explainability traceability fields, what-if validation failure mode).
+
 Run:
 ```zsh
 pytest -q
 ```
+
+CI also runs:
+- `pytest`
+- model train + explainability generation
+- Docker smoke check (`docker build` + run + `curl /health`)
 
 
 ## Repository layout (high level)
@@ -283,6 +311,9 @@ pytest -q
   - `train.py` — training pipeline (produces `models/model.joblib` + metrics)
   - `validate_ts.py` — time-series CV metrics (walk-forward style)
   - `explain.py` — permutation importance → `reports/feature_importance.*`
+  - `config.py` — centralized env-driven runtime settings
+  - `dataset_versioning.py` — dataset SHA-256 + metadata generation
+  - `logging_utils.py` — JSON logging formatter + bootstrap
   - `unstructured.py` — optional text/document ingestion + normalization helpers
   - `roi.py` — ROI engine / finance helpers
   - `underwrite.py` — simple underwriting model
@@ -300,6 +331,7 @@ pytest -q
 - `tests/`
   - `test_whatif_exit_cap_default.py`
   - `test_unstructured.py`
+  - `test_api_basic.py`
 - `models/` (generated)
 - `reports/` (generated)
 - `data/raw/` (generated)
