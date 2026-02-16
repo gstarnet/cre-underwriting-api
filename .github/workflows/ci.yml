@@ -26,6 +26,7 @@ jobs:
 
       - name: Train + explain + validate_ts
         run: |
+          python -m src.synth_data
           python -m src.train
           python -m src.explain
           python -m src.validate_ts
