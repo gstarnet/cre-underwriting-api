@@ -26,23 +26,28 @@ Or use the helper script:
 ./scripts/rebuild_env.sh
 ```
 
-### 2) Train model + metrics
+### 2) Generate (or refresh) local synthetic dataset
+```zsh
+python -m src.synth_data
+```
+
+### 3) Train model + metrics
 ```zsh
 python -m src.train
 ```
 
-### 3) Generate explainability artifacts
+### 4) Generate explainability artifacts
 ```zsh
 python -m src.explain
 ```
 
-### 4) Start API
+### 5) Start API
 Serves on `0.0.0.0:8000`.
 ```zsh
 python -m src
 ```
 
-### 5) Run smoke tests
+### 6) Run smoke tests
 ```zsh
 ./scripts/smoke_api.sh
 ```
@@ -124,10 +129,10 @@ docker run --rm -p 8000:8000 cre-underwriting-api:with-model
 
 Or use the helper:
 ```zsh
-./scripts/docker_build_run.sh build
-./scripts/docker_build_run.sh run mount-model
-./scripts/docker_build_run.sh run with-model
-./scripts/docker_build_run.sh stop
+./scripts/docker_build_run.sh --type both
+./scripts/docker_build_run.sh --type mount-model --run --port 8000
+./scripts/docker_build_run.sh --type with-model --run --port 8001
+./scripts/docker_build_run.sh --type both --stop
 ```
 
 
@@ -137,7 +142,7 @@ Base URL: `http://127.0.0.1:8000`
 
 - `GET  /health` — basic health check
 - `POST /predict` — predict next-12 NOI
-- `POST /predict_features` — return feature vector used for prediction (debug/visibility)
+- `POST /predict_features` — predict from a free-form `features` payload (optional ROI if finance fields are present)
 - `POST /whatif` — simple what-if scenario grid (price / exit cap variations)
 - `POST /underwrite` — simple multi-year underwriting
 - `POST /underwrite_inst` — institutional underwriting (v2 knobs)
@@ -189,16 +194,16 @@ Build and (optionally) run Docker images for both deployment modes:
 Examples:
 ```zsh
 # build both targets
-./scripts/docker_build_run.sh build
+./scripts/docker_build_run.sh --type both
 
 # run mount-model (mounts local models/)
-./scripts/docker_build_run.sh run mount-model
+./scripts/docker_build_run.sh --type mount-model --run --port 8000
 
 # run with-model (no volume mount)
-./scripts/docker_build_run.sh run with-model
+./scripts/docker_build_run.sh --type with-model --run --port 8001
 
-# stop running container (if supported by script)
-./scripts/docker_build_run.sh stop
+# stop both containers
+./scripts/docker_build_run.sh --type both --stop
 ```
 
 ### `scripts/smoke_api.sh`
@@ -259,6 +264,9 @@ from src.data_load import load_cre_csv
 ### `tests/test_whatif_exit_cap_default.py`
 Regression test: confirms `exit_cap_rate` default/behavior in what-if logic.
 
+### `tests/test_unstructured.py`
+Regression tests for unstructured text ingestion helpers (`parse_document_paths`, file extraction, and DataFrame enrichment).
+
 Run:
 ```zsh
 pytest -q
@@ -271,9 +279,11 @@ pytest -q
   - `__main__.py` — `python -m src` entrypoint (Uvicorn)
   - `api.py` — FastAPI app + endpoints
   - `data_load.py` — load + time-based split utilities
+  - `synth_data.py` — synthetic CRE dataset generator (`data/raw/cre_deals.csv`)
   - `train.py` — training pipeline (produces `models/model.joblib` + metrics)
   - `validate_ts.py` — time-series CV metrics (walk-forward style)
   - `explain.py` — permutation importance → `reports/feature_importance.*`
+  - `unstructured.py` — optional text/document ingestion + normalization helpers
   - `roi.py` — ROI engine / finance helpers
   - `underwrite.py` — simple underwriting model
   - `underwrite_inst.py` — institutional underwriting v2
@@ -289,6 +299,7 @@ pytest -q
   - `docker_build_run.sh`
 - `tests/`
   - `test_whatif_exit_cap_default.py`
+  - `test_unstructured.py`
 - `models/` (generated)
 - `reports/` (generated)
 - `data/raw/` (generated)
